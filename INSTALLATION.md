@@ -12,6 +12,7 @@
 4. Select `verification-system.zip` from your computer and click **Install Now**.
 5. Once uploaded, click **Activate Plugin**.
 6. On activation:
-   - Plugin database tables with `$wpdb->prefix` are created automatically.
-   - The default roles (`vs_general_manager`, `vs_branch_manager`, `vs_employee`) are registered.
-   - An independent application page titled **Verification System App** containing shortcode `[verification_system]` is automatically published at `/verification-system`.
+   - Database tables with `$wpdb->prefix` are created or upgraded automatically.
+   - Default roles (`vs_general_manager`, `vs_branch_manager`, `vs_employee`) are registered.
+   - An independent application page titled **Verification System App** containing shortcode `[verification_system]` is automatically published or restored at `/verification-system`.
+   - The application page uses a standalone theme-isolation canvas template that removes theme headers, footers, and sidebars.

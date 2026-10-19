@@ -1,4 +1,4 @@
-/* Verification System – Single Page Frontend Application Engine */
+/* Verification System – Single Page Frontend Application Engine with Floating Left Sidebar */
 
 (function () {
 	'use strict';
@@ -6,18 +6,36 @@
 	const App = {
 		config: window.VS_CONFIG || {},
 		state: {
-			route: 'login',
+			route: 'dashboard',
 			user: null,
 			dashboardData: null,
 			branches: [],
 			employees: [],
 			reportsData: null,
 			auditLogs: [],
+			wifiConfig: null,
+			selectedBranchId: 0,
 		},
 
 		init: function () {
 			this.state.user = this.config.user;
-			this.state.route = this.config.is_logged_in ? 'dashboard' : 'login';
+
+			// Handle hash-based SPA routing
+			const initialHash = window.location.hash.replace('#', '');
+			if (initialHash && ['dashboard', 'employees', 'branches', 'reports', 'wifi-settings', 'audit'].includes(initialHash)) {
+				this.state.route = initialHash;
+			} else {
+				this.state.route = this.config.is_logged_in ? 'dashboard' : 'login';
+			}
+
+			window.addEventListener('hashchange', () => {
+				const hash = window.location.hash.replace('#', '');
+				if (hash && hash !== this.state.route) {
+					this.state.route = hash;
+					this.render();
+				}
+			});
+
 			this.render();
 		},
 
@@ -36,7 +54,7 @@
 				return;
 			}
 
-			let navHtml = this.templateNavbar();
+			let sidebarHtml = this.templateSidebar();
 			let mainHtml = '';
 
 			switch (this.state.route) {
@@ -52,6 +70,9 @@
 				case 'reports':
 					mainHtml = this.templateReports();
 					break;
+				case 'wifi-settings':
+					mainHtml = this.templateWifiSettings();
+					break;
 				case 'audit':
 					mainHtml = this.templateAuditLogs();
 					break;
@@ -59,10 +80,15 @@
 					mainHtml = this.templateDashboard();
 			}
 
-			viewport.innerHTML = navHtml + '<div class="vs-container">' + mainHtml + '</div>';
+			viewport.innerHTML = `
+				<button class="vs-mobile-toggle" id="vs-mobile-menu-btn">☰ Menu</button>
+				${sidebarHtml}
+				<div class="vs-main-content">${mainHtml}</div>
+			`;
+
 			this.bindAppEvents();
 
-			// Initial data load for route
+			// Route data prefetching
 			if (this.state.route === 'dashboard' && !this.state.dashboardData) {
 				this.fetchDashboard();
 			} else if (this.state.route === 'employees' && this.state.employees.length === 0) {
@@ -71,31 +97,74 @@
 				this.fetchBranches();
 			} else if (this.state.route === 'reports' && !this.state.reportsData) {
 				this.fetchReports();
+			} else if (this.state.route === 'wifi-settings' && !this.state.wifiConfig) {
+				this.fetchBranches().then(() => {
+					if (this.state.branches.length > 0) {
+						this.state.selectedBranchId = this.state.branches[0].id;
+						this.fetchWifiConfig(this.state.selectedBranchId);
+					}
+				});
 			} else if (this.state.route === 'audit' && this.state.auditLogs.length === 0) {
 				this.fetchAuditLogs();
 			}
 		},
 
-		templateNavbar: function () {
+		templateSidebar: function () {
 			const role = this.state.user ? this.state.user.role : '';
 			const isManager = (role === 'vs_system_admin' || role === 'vs_general_manager' || role === 'vs_branch_manager');
+			const isAdmin = (role === 'vs_system_admin' || role === 'vs_general_manager');
 
 			return `
-				<div class="vs-navbar">
-					<div class="vs-brand">
-						<div class="vs-brand-logo">VS</div>
-						<span>Verification System</span>
+				<div class="vs-sidebar" id="vs-app-sidebar">
+					<div>
+						<div class="vs-sidebar-brand">
+							<div class="vs-sidebar-logo">VS</div>
+							<div class="vs-sidebar-title">Verification System</div>
+						</div>
+						<div class="vs-sidebar-menu">
+							<button class="vs-menu-item ${this.state.route === 'dashboard' ? 'active' : ''}" data-route="dashboard">
+								<svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+								Dashboard
+							</button>
+							${isManager ? `
+								<button class="vs-menu-item ${this.state.route === 'employees' ? 'active' : ''}" data-route="employees">
+									<svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+									Employees
+								</button>
+							` : ''}
+							${isManager ? `
+								<button class="vs-menu-item ${this.state.route === 'branches' ? 'active' : ''}" data-route="branches">
+									<svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+									Branches
+								</button>
+							` : ''}
+							<button class="vs-menu-item ${this.state.route === 'reports' ? 'active' : ''}" data-route="reports">
+								<svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+								Reports
+							</button>
+							${isAdmin ? `
+								<button class="vs-menu-item ${this.state.route === 'wifi-settings' ? 'active' : ''}" data-route="wifi-settings">
+									<svg viewBox="0 0 24 24"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+									Wi-Fi Settings
+								</button>
+							` : ''}
+							${isManager ? `
+								<button class="vs-menu-item ${this.state.route === 'audit' ? 'active' : ''}" data-route="audit">
+									<svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+									Audit Logs
+								</button>
+							` : ''}
+						</div>
 					</div>
-					<div class="vs-nav-links">
-						<button class="vs-nav-btn ${this.state.route === 'dashboard' ? 'active' : ''}" data-route="dashboard">Dashboard</button>
-						${isManager ? `<button class="vs-nav-btn ${this.state.route === 'employees' ? 'active' : ''}" data-route="employees">Employees</button>` : ''}
-						${isManager ? `<button class="vs-nav-btn ${this.state.route === 'branches' ? 'active' : ''}" data-route="branches">Branches</button>` : ''}
-						<button class="vs-nav-btn ${this.state.route === 'reports' ? 'active' : ''}" data-route="reports">Reports</button>
-						${isManager ? `<button class="vs-nav-btn ${this.state.route === 'audit' ? 'active' : ''}" data-route="audit">Audit Logs</button>` : ''}
-					</div>
-					<div class="vs-user-meta">
-						<div class="vs-avatar">${this.state.user && this.state.user.name ? this.state.user.name.charAt(0).toUpperCase() : 'U'}</div>
-						<button id="vs-logout-btn" class="vs-btn vs-btn-secondary" style="padding: 6px 12px; font-size: 12px;">Sign Out</button>
+					<div class="vs-sidebar-footer">
+						<div class="vs-user-card">
+							<div class="vs-avatar">${this.state.user && this.state.user.name ? this.state.user.name.charAt(0).toUpperCase() : 'U'}</div>
+							<div class="vs-user-info">
+								<div class="vs-user-name">${this.state.user ? this.state.user.name : 'User'}</div>
+								<div class="vs-user-role">${this.state.user ? this.state.user.role.replace('vs_', '').replace('_', ' ') : ''}</div>
+							</div>
+						</div>
+						<button id="vs-logout-btn" class="vs-btn vs-btn-secondary vs-btn-block">Sign Out</button>
 					</div>
 				</div>
 			`;
@@ -103,9 +172,9 @@
 
 		templateLogin: function () {
 			return `
-				<div class="vs-container" style="max-width: 420px; padding-top: 60px;">
+				<div class="vs-container" style="max-width: 420px; padding-top: 80px;">
 					<div class="vs-card" style="text-align: center;">
-						<div class="vs-brand-logo" style="margin: 0 auto 16px auto; width: 48px; height: 48px; font-size: 20px;">VS</div>
+						<div class="vs-sidebar-logo" style="margin: 0 auto 16px auto; width: 48px; height: 48px; font-size: 20px;">VS</div>
 						<h2 style="margin: 0 0 6px 0; font-size: 20px;">Employee Sign In</h2>
 						<p style="color: var(--vs-muted); font-size: 13px; margin: 0 0 24px 0;">Smart Attendance & Workforce Management</p>
 
@@ -219,7 +288,7 @@
 					<div class="vs-card-header">
 						<h3 class="vs-card-title">Employee Management</h3>
 						<div style="display: flex; gap: 8px;">
-							<button id="vs-add-emp-btn" class="vs-btn vs-btn-primary">+ Add Employee</button>
+							<button id="vs-add-emp-btn" class="vs-btn vs-btn-primary">+ Create Account</button>
 							<button id="vs-export-emp-btn" class="vs-btn vs-btn-secondary">Export CSV</button>
 						</div>
 					</div>
@@ -234,6 +303,7 @@
 									<th>Branch</th>
 									<th>Role</th>
 									<th>Status</th>
+									<th>Actions</th>
 								</tr>
 							</thead>
 							<tbody>
@@ -243,14 +313,19 @@
 										<td>${emp.full_name}</td>
 										<td>${emp.phone_number}</td>
 										<td>${emp.branch_name || 'N/A'}</td>
-										<td>${emp.app_role}</td>
-										<td><span class="vs-badge">${emp.status}</span></td>
+										<td>${emp.app_role ? emp.app_role.replace('vs_', '').replace('_', ' ') : 'Employee'}</td>
+										<td><span class="vs-badge vs-badge-${emp.status}">${emp.status}</span></td>
+										<td>
+											<button class="vs-btn vs-btn-secondary vs-reset-pass-btn" data-id="${emp.id}" style="padding: 4px 8px; font-size: 11px;">Reset Password</button>
+										</td>
 									</tr>
-								`).join('') || '<tr><td colspan="6" style="text-align:center;">No employees found.</td></tr>'}
+								`).join('') || '<tr><td colspan="7" style="text-align:center;">No accounts found.</td></tr>'}
 							</tbody>
 						</table>
 					</div>
 				</div>
+
+				<div id="vs-modal-container"></div>
 			`;
 		},
 
@@ -286,6 +361,74 @@
 							</tbody>
 						</table>
 					</div>
+				</div>
+			`;
+		},
+
+		templateWifiSettings: function () {
+			const cfg = this.state.wifiConfig || {};
+			return `
+				<div class="vs-card">
+					<div class="vs-card-header">
+						<h3 class="vs-card-title">Branch Wi-Fi Settings & Integration Diagnostics</h3>
+					</div>
+
+					<div class="vs-form-group">
+						<label class="vs-label">Select Target Branch</label>
+						<select id="vs-wifi-branch-select" class="vs-select">
+							${this.state.branches.map(b => `
+								<option value="${b.id}" ${b.id == this.state.selectedBranchId ? 'selected' : ''}>${b.name} (${b.branch_code})</option>
+							`).join('')}
+						</select>
+					</div>
+
+					<div id="vs-wifi-alert"></div>
+
+					<form id="vs-wifi-form">
+						<div class="vs-grid">
+							<div class="vs-form-group">
+								<label class="vs-label">Configuration Name</label>
+								<input type="text" id="vs-wifi-name" class="vs-input" value="${cfg.config_name || 'Main Office Wi-Fi'}" required />
+							</div>
+							<div class="vs-form-group">
+								<label class="vs-label">Integration Type</label>
+								<select id="vs-wifi-type" class="vs-select">
+									<option value="hmac_token" ${cfg.auth_type === 'hmac_token' ? 'selected' : ''}>HMAC Signed Token Gateway</option>
+									<option value="meraki" ${cfg.auth_type === 'meraki' ? 'selected' : ''}>Cisco Meraki Enterprise Controller</option>
+								</select>
+							</div>
+						</div>
+
+						<div class="vs-form-group">
+							<label class="vs-label">Approved Network SSID</label>
+							<input type="text" id="vs-wifi-ssid" class="vs-input" value="${cfg.ssid || ''}" placeholder="e.g. Workplace_Secure_WiFi" required />
+						</div>
+
+						<div class="vs-form-group">
+							<label class="vs-label">Approved Access Point BSSIDs (One per line)</label>
+							<textarea id="vs-wifi-bssids" class="vs-textarea" rows="3" placeholder="00:11:22:33:44:55">${cfg.allowed_bssids || ''}</textarea>
+						</div>
+
+						<div class="vs-form-group">
+							<label class="vs-label">Shared Secret Key / HMAC Secret</label>
+							<input type="password" id="vs-wifi-secret" class="vs-input" value="${cfg.shared_secret || ''}" placeholder="••••••••" />
+						</div>
+
+						<div class="vs-form-group">
+							<label class="vs-label">Controller API Endpoint (Cisco Meraki)</label>
+							<input type="text" id="vs-wifi-endpoint" class="vs-input" value="${cfg.api_endpoint || ''}" placeholder="https://api.meraki.com/api/v1" />
+						</div>
+
+						<div class="vs-form-group">
+							<label class="vs-label">Controller API Key (Cisco Meraki)</label>
+							<input type="password" id="vs-wifi-key" class="vs-input" value="${cfg.api_key || ''}" placeholder="••••••••" />
+						</div>
+
+						<div style="display: flex; gap: 12px; margin-top: 20px;">
+							<button type="submit" class="vs-btn vs-btn-primary">Save Wi-Fi Configuration</button>
+							<button type="button" id="vs-test-wifi-btn" class="vs-btn vs-btn-secondary">Test Controller Connection</button>
+						</div>
+					</form>
 				</div>
 			`;
 		},
@@ -408,10 +551,19 @@
 		},
 
 		bindAppEvents: function () {
-			// Nav buttons
-			document.querySelectorAll('.vs-nav-btn').forEach(btn => {
+			// Mobile Drawer Menu toggle
+			const mobileBtn = document.getElementById('vs-mobile-menu-btn');
+			const sidebar = document.getElementById('vs-app-sidebar');
+			if (mobileBtn && sidebar) {
+				mobileBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+			}
+
+			// Sidebar menu buttons
+			document.querySelectorAll('.vs-menu-item').forEach(btn => {
 				btn.addEventListener('click', (e) => {
-					this.state.route = e.target.getAttribute('data-route');
+					const target = e.currentTarget.getAttribute('data-route');
+					this.state.route = target;
+					window.location.hash = target;
 					this.render();
 				});
 			});
@@ -421,23 +573,214 @@
 			if (logoutBtn) {
 				logoutBtn.addEventListener('click', () => {
 					this.request('/auth/logout', 'POST')
-						.then(() => window.location.reload());
+						.then(() => {
+							this.config.is_logged_in = false;
+							this.state.user = null;
+							window.location.hash = '';
+							window.location.reload();
+						});
 				});
 			}
 
-			// Check in / Check out
+			// Attendance Check-In / Check-Out
 			const checkInBtn = document.getElementById('vs-check-in-btn');
 			if (checkInBtn) {
-				checkInBtn.addEventListener('click', () => this.handleAttendanceAction('check-in'));
+				checkInBtn.addEventListener('click', () => this.runAttendanceSequence('check-in'));
 			}
 
 			const checkOutBtn = document.getElementById('vs-check-out-btn');
 			if (checkOutBtn) {
-				checkOutBtn.addEventListener('click', () => this.handleAttendanceAction('check-out'));
+				checkOutBtn.addEventListener('click', () => this.runAttendanceSequence('check-out'));
 			}
 
-			// Clock timer
+			// Add Employee Modal
+			const addEmpBtn = document.getElementById('vs-add-emp-btn');
+			if (addEmpBtn) {
+				addEmpBtn.addEventListener('click', () => this.openAddEmployeeModal());
+			}
+
+			// Reset Password Buttons
+			document.querySelectorAll('.vs-reset-pass-btn').forEach(btn => {
+				btn.addEventListener('click', (e) => {
+					const empId = e.currentTarget.getAttribute('data-id');
+					const newPass = prompt("Enter new password (min 6 chars):");
+					if (newPass) {
+						this.request(`/employees/${empId}/reset-password`, 'POST', { password: newPass })
+							.then(res => {
+								alert(res.message);
+							});
+					}
+				});
+			});
+
+			// Wi-Fi Config Form & Test
+			const wifiBranchSelect = document.getElementById('vs-wifi-branch-select');
+			if (wifiBranchSelect) {
+				wifiBranchSelect.addEventListener('change', (e) => {
+					this.state.selectedBranchId = e.target.value;
+					this.fetchWifiConfig(this.state.selectedBranchId);
+				});
+			}
+
+			const wifiForm = document.getElementById('vs-wifi-form');
+			if (wifiForm) {
+				wifiForm.addEventListener('submit', (e) => {
+					e.preventDefault();
+					const payload = {
+						branch_id: this.state.selectedBranchId,
+						config_name: document.getElementById('vs-wifi-name').value,
+						auth_type: document.getElementById('vs-wifi-type').value,
+						ssid: document.getElementById('vs-wifi-ssid').value,
+						allowed_bssids: document.getElementById('vs-wifi-bssids').value,
+						shared_secret: document.getElementById('vs-wifi-secret').value,
+						api_endpoint: document.getElementById('vs-wifi-endpoint').value,
+						api_key: document.getElementById('vs-wifi-key').value,
+						is_active: 1
+					};
+
+					this.request('/wifi/config', 'POST', payload)
+						.then(res => {
+							this.showAlert('vs-wifi-alert', res.message, res.success ? 'success' : 'error');
+						});
+				});
+			}
+
+			const testWifiBtn = document.getElementById('vs-test-wifi-btn');
+			if (testWifiBtn) {
+				testWifiBtn.addEventListener('click', () => {
+					this.request('/wifi/test', 'POST', { branch_id: this.state.selectedBranchId })
+						.then(res => {
+							this.showAlert('vs-wifi-alert', res.message, res.success ? 'success' : 'error');
+						});
+				});
+			}
+
 			this.startLiveClock();
+		},
+
+		runAttendanceSequence: function (action) {
+			const overlay = document.createElement('div');
+			overlay.className = 'vs-progress-overlay';
+			overlay.innerHTML = `
+				<div class="vs-progress-box">
+					<h3 style="margin: 0 0 8px 0; font-size: 18px;">Attendance Verification</h3>
+					<p style="color: var(--vs-muted); font-size: 13px; margin: 0;">Please stay on this screen while we verify your workplace connectivity.</p>
+
+					<div class="vs-progress-steps">
+						<div class="vs-step-item active" id="vs-step-1"><div class="vs-step-icon"></div> Checking Employee Account...</div>
+						<div class="vs-step-item" id="vs-step-2"><div class="vs-step-icon"></div> Identifying Assigned Branch...</div>
+						<div class="vs-step-item" id="vs-step-3"><div class="vs-step-icon"></div> Connecting to Workplace Verification Service...</div>
+						<div class="vs-step-item" id="vs-step-4"><div class="vs-step-icon"></div> Verifying Authorized Network Session...</div>
+						<div class="vs-step-item" id="vs-step-5"><div class="vs-step-icon"></div> Validating Attendance Information...</div>
+					</div>
+				</div>
+			`;
+			document.body.appendChild(overlay);
+
+			const setStep = (num, status) => {
+				const el = document.getElementById('vs-step-' + num);
+				if (el) {
+					el.className = 'vs-step-item ' + status;
+				}
+			};
+
+			setTimeout(() => { setStep(1, 'completed'); setStep(2, 'active'); }, 500);
+			setTimeout(() => { setStep(2, 'completed'); setStep(3, 'active'); }, 1000);
+			setTimeout(() => { setStep(3, 'completed'); setStep(4, 'active'); }, 1500);
+
+			setTimeout(() => {
+				setStep(4, 'completed');
+				setStep(5, 'active');
+
+				const payload = {
+					ssid: 'Workplace_WiFi',
+					timestamp: Math.floor(Date.now() / 1000)
+				};
+
+				this.request('/attendance/' + action, 'POST', payload)
+					.then(res => {
+						document.body.removeChild(overlay);
+						if (res.success) {
+							this.showAlert('vs-attendance-alert', res.message, 'success');
+							this.fetchDashboard();
+						} else {
+							this.showAlert('vs-attendance-alert', res.message, 'error');
+						}
+					})
+					.catch(err => {
+						document.body.removeChild(overlay);
+						this.showAlert('vs-attendance-alert', err.message || 'Verification request failed.', 'error');
+					});
+			}, 2000);
+		},
+
+		openAddEmployeeModal: function () {
+			const container = document.getElementById('vs-modal-container');
+			if (!container) return;
+
+			container.innerHTML = `
+				<div class="vs-progress-overlay">
+					<div class="vs-progress-box" style="text-align: left; max-width: 500px;">
+						<h3 style="margin: 0 0 16px 0; font-size: 18px;">Create Employee Account</h3>
+						<form id="vs-create-emp-form">
+							<div class="vs-form-group">
+								<label class="vs-label">Full Name</label>
+								<input type="text" id="vs-emp-name" class="vs-input" required />
+							</div>
+							<div class="vs-form-group">
+								<label class="vs-label">Employee ID</label>
+								<input type="text" id="vs-emp-code" class="vs-input" placeholder="EMP-1001" required />
+							</div>
+							<div class="vs-form-group">
+								<label class="vs-label">Mobile Number</label>
+								<div class="vs-phone-group">
+									<div class="vs-phone-prefix">🇦🇪 +971</div>
+									<input type="text" id="vs-emp-phone" class="vs-input" placeholder="50 123 4567" required />
+								</div>
+							</div>
+							<div class="vs-form-group">
+								<label class="vs-label">Assigned Branch</label>
+								<select id="vs-emp-branch" class="vs-select">
+									${this.state.branches.map(b => `<option value="${b.id}">${b.name}</option>`).join('')}
+								</select>
+							</div>
+							<div class="vs-form-group">
+								<label class="vs-label">Assigned Role</label>
+								<select id="vs-emp-role" class="vs-select">
+									<option value="vs_employee">Employee</option>
+									<option value="vs_branch_manager">Branch Manager</option>
+								</select>
+							</div>
+							<div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px;">
+								<button type="button" class="vs-btn vs-btn-secondary" id="vs-close-modal">Cancel</button>
+								<button type="submit" class="vs-btn vs-btn-primary">Create Account</button>
+							</div>
+						</form>
+					</div>
+				</div>
+			`;
+
+			document.getElementById('vs-close-modal').addEventListener('click', () => { container.innerHTML = ''; });
+			document.getElementById('vs-create-emp-form').addEventListener('submit', (e) => {
+				e.preventDefault();
+				const payload = {
+					full_name: document.getElementById('vs-emp-name').value,
+					employee_code: document.getElementById('vs-emp-code').value,
+					phone_number: document.getElementById('vs-emp-phone').value,
+					branch_id: document.getElementById('vs-emp-branch').value,
+					app_role: document.getElementById('vs-emp-role').value
+				};
+
+				this.request('/employees', 'POST', payload)
+					.then(res => {
+						container.innerHTML = '';
+						if (res.success) {
+							this.fetchEmployees();
+						} else {
+							alert(res.message);
+						}
+					});
+			});
 		},
 
 		startLiveClock: function () {
@@ -451,74 +794,58 @@
 			setInterval(update, 1000);
 		},
 
-		handleAttendanceAction: function (action) {
-			const payload = {
-				ssid: 'Workplace_WiFi',
-				timestamp: Math.floor(Date.now() / 1000)
-			};
-
-			this.request('/attendance/' + action, 'POST', payload)
-				.then(res => {
-					if (res.success) {
-						this.showAlert('vs-attendance-alert', res.message, 'success');
-						this.fetchDashboard();
-					} else {
-						this.showAlert('vs-attendance-alert', res.message, 'error');
-					}
-				})
-				.catch(err => {
-					this.showAlert('vs-attendance-alert', err.message || 'Verification request failed.', 'error');
-				});
-		},
-
 		fetchDashboard: function () {
-			this.request('/dashboard', 'GET')
-				.then(res => {
-					if (res.success) {
-						this.state.dashboardData = res;
-						this.render();
-					}
-				});
+			return this.request('/dashboard', 'GET').then(res => {
+				if (res.success) {
+					this.state.dashboardData = res;
+					this.render();
+				}
+			});
 		},
 
 		fetchEmployees: function () {
-			this.request('/employees', 'GET')
-				.then(res => {
-					if (res.success) {
-						this.state.employees = res.employees;
-						this.render();
-					}
-				});
+			return this.request('/employees', 'GET').then(res => {
+				if (res.success) {
+					this.state.employees = res.employees;
+					this.render();
+				}
+			});
 		},
 
 		fetchBranches: function () {
-			this.request('/branches', 'GET')
-				.then(res => {
-					if (res.success) {
-						this.state.branches = res.branches;
-						this.render();
-					}
-				});
+			return this.request('/branches', 'GET').then(res => {
+				if (res.success) {
+					this.state.branches = res.branches;
+					this.render();
+				}
+			});
+		},
+
+		fetchWifiConfig: function (branchId) {
+			return this.request(`/wifi/config?branch_id=${branchId}`, 'GET').then(res => {
+				if (res.success) {
+					this.state.wifiConfig = res.config;
+					this.render();
+				}
+			});
 		},
 
 		fetchReports: function () {
-			this.request('/reports/attendance', 'GET')
-				.then(res => {
-					if (res.success) {
-						this.state.reportsData = res.data;
-						this.render();
-					}
-				});
+			return this.request('/reports/attendance', 'GET').then(res => {
+				if (res.success) {
+					this.state.reportsData = res.data;
+					this.render();
+				}
+			});
 		},
 
 		fetchAuditLogs: function () {
-			this.request('/audit-logs', 'GET')
-				.then(res => {
-					if (res.success) {
-						this.state.auditLogs = res.logs;
-						this.render();
-					}
-				});
+			return this.request('/audit-logs', 'GET').then(res => {
+				if (res.success) {
+					this.state.auditLogs = res.logs;
+					this.render();
+				}
+			});
 		},
 
 		request: function (endpoint, method, data) {

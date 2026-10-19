@@ -84,8 +84,9 @@ function get_role( $slug ) { return null; }
 function __ ( $text, $domain = '' ) { return $text; }
 function wp_hash_password( $pass ) { return md5( $pass ); }
 function wp_check_password( $pass, $hash ) { return md5( $pass ) === $hash; }
+function wp_set_password( $pass, $user_id ) { return true; }
 function current_time( $type ) { return date( 'Y-m-d H:i:s' ); }
-function wp_get_current_user() { return (object) array( 'ID' => 1, 'display_name' => 'Test Admin' ); }
+function wp_get_current_user() { return (object) array( 'ID' => 1, 'display_name' => 'Test General Manager', 'roles' => array( 'vs_general_manager' ) ); }
 function get_current_user_id() { return 1; }
 function current_user_can( $cap ) { return true; }
 function sanitize_text_field( $str ) { return trim( strip_tags( $str ) ); }
@@ -107,6 +108,7 @@ class VS_Test_Runner {
 		$this->test_wifi_hmac_verification();
 		$this->test_schedule_calculations();
 		$this->test_audit_sanitization();
+		$this->test_wifi_diagnostics();
 
 		echo "\n=============================================\n";
 		echo "Total Passed: {$this->passed}\n";
@@ -146,16 +148,17 @@ class VS_Test_Runner {
 		echo "\n--- Testing Wi-Fi HMAC Fail-Closed Verification ---\n";
 		$adapter = new VS_WiFi_HMAC_Adapter();
 		$employee = (object) array( 'id' => 101, 'branch_id' => 1 );
-		$config = (object) array( 'ssid' => 'Workplace_WiFi', 'shared_secret' => 'supersecretkey' );
+		$config = (object) array( 'ssid' => 'Workplace_WiFi', 'shared_secret' => 'supersecretkey', 'verification_timeout' => 180, 'allowed_bssids' => "00:11:22:33:44:55" );
 
 		$now = time();
-		$payload_str = '101|Workplace_WiFi||' . $now;
+		$payload_str = '101|Workplace_WiFi|00:11:22:33:44:55|' . $now;
 		$valid_token = hash_hmac( 'sha256', $payload_str, 'supersecretkey' );
 
 		$valid_res = $adapter->verify( $employee, array(
 			'token' => $valid_token,
 			'timestamp' => $now,
 			'ssid' => 'Workplace_WiFi',
+			'bssid' => '00:11:22:33:44:55',
 		), $config );
 
 		$this->assert( $valid_res['success'] === true, 'Valid Wi-Fi HMAC token verifies successfully' );
@@ -164,6 +167,7 @@ class VS_Test_Runner {
 			'token' => 'forgedtoken123',
 			'timestamp' => $now,
 			'ssid' => 'Workplace_WiFi',
+			'bssid' => '00:11:22:33:44:55',
 		), $config );
 
 		$this->assert( $forged_res['success'] === false, 'Forged Wi-Fi token fails verification' );
@@ -198,6 +202,12 @@ class VS_Test_Runner {
 
 		$this->assert( $clean['password'] === '***REDACTED***', 'Password parameter is redacted in audit logs' );
 		$this->assert( $clean['otp'] === '***REDACTED***', 'OTP parameter is redacted in audit logs' );
+	}
+
+	private function test_wifi_diagnostics() {
+		echo "\n--- Testing Wi-Fi Controller Diagnostics ---\n";
+		$diag = VS_WiFi::test_controller_connection( 1 );
+		$this->assert( isset( $diag['success'] ), 'Wi-Fi controller test endpoint returns structured status' );
 	}
 }
 

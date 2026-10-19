@@ -66,7 +66,6 @@ class VS_Employee {
 
 		$user_id = wp_create_user( $username, $password, $email );
 		if ( is_wp_error( $user_id ) ) {
-			// If username exists, try generating with employee code
 			$username = 'emp_' . strtolower( sanitize_user( $employee_code ) );
 			$user_id  = wp_create_user( $username, $password, $email );
 			if ( is_wp_error( $user_id ) ) {
@@ -76,12 +75,14 @@ class VS_Employee {
 
 		// Set WP User Role & Display Name
 		$user = get_user_by( 'id', $user_id );
-		$user->set_role( $app_role );
-		wp_update_user( array(
-			'ID'           => $user_id,
-			'display_name' => $full_name,
-			'first_name'   => $full_name,
-		) );
+		if ( $user ) {
+			$user->set_role( $app_role );
+			wp_update_user( array(
+				'ID'           => $user_id,
+				'display_name' => $full_name,
+				'first_name'   => $full_name,
+			) );
+		}
 
 		// Insert Employee Record
 		$insert_data = array(
@@ -156,7 +157,6 @@ class VS_Employee {
 		}
 		if ( isset( $data['app_role'] ) ) {
 			$update_data['app_role'] = sanitize_text_field( $data['app_role'] );
-			// Update WP User role
 			if ( $employee->user_id ) {
 				$user = get_user_by( 'id', $employee->user_id );
 				if ( $user ) {
@@ -191,6 +191,46 @@ class VS_Employee {
 		}
 
 		return true;
+	}
+
+	/**
+	 * Reset employee password.
+	 *
+	 * @param int    $employee_id Employee ID.
+	 * @param string $new_password Password string.
+	 * @return bool|WP_Error
+	 */
+	public static function reset_password( $employee_id, $new_password ) {
+		$employee = self::get_employee( $employee_id );
+		if ( ! $employee ) {
+			return new WP_Error( 'not_found', __( 'Employee record not found.', 'verification-system' ) );
+		}
+
+		if ( ! VS_Branch::can_manage_branch( $employee->branch_id ) ) {
+			return new WP_Error( 'permission_denied', __( 'Permission denied to reset password for this employee.', 'verification-system' ) );
+		}
+
+		if ( empty( $new_password ) || strlen( $new_password ) < 6 ) {
+			return new WP_Error( 'invalid_password', __( 'Password must be at least 6 characters long.', 'verification-system' ) );
+		}
+
+		if ( $employee->user_id ) {
+			wp_set_password( $new_password, $employee->user_id );
+
+			VS_Audit::log_event(
+				get_current_user_id(),
+				wp_get_current_user()->display_name,
+				'manager',
+				'reset_password',
+				'employee',
+				$employee_id,
+				$employee->branch_id,
+				array( 'message' => 'Password reset by manager' )
+			);
+			return true;
+		}
+
+		return new WP_Error( 'no_user_mapping', __( 'No user account mapped to employee.', 'verification-system' ) );
 	}
 
 	/**
@@ -243,7 +283,6 @@ class VS_Employee {
 				continue;
 			}
 
-			// Map CSV fields: Employee ID, Full Name, Phone Number, Email, Department, Job Title, Branch ID
 			$emp_code  = isset( $row[0] ) ? trim( $row[0] ) : '';
 			$full_name = isset( $row[1] ) ? trim( $row[1] ) : '';
 			$phone     = isset( $row[2] ) ? trim( $row[2] ) : '';
@@ -292,7 +331,7 @@ class VS_Employee {
 		$emp_table    = $wpdb->prefix . 'vs_employees';
 		$branch_table = $wpdb->prefix . 'vs_branches';
 
-		$user = wp_get_current_user();
+		$user  = wp_get_current_user();
 		$where = "WHERE 1=1";
 
 		if ( $branch_id > 0 ) {
@@ -301,8 +340,8 @@ class VS_Employee {
 			}
 			$where .= $wpdb->prepare( " AND e.branch_id = %d", $branch_id );
 		} elseif ( VS_Roles::is_branch_manager( $user ) ) {
-			$emp = VS_Auth::get_current_employee();
-			$b_id = $emp ? $emp->branch_id : 0;
+			$emp   = VS_Auth::get_current_employee();
+			$b_id  = $emp ? $emp->branch_id : 0;
 			$where .= $wpdb->prepare( " AND e.branch_id = %d", $b_id );
 		}
 

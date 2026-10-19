@@ -86,6 +86,20 @@ class VS_Rest_API {
 			)
 		) );
 
+		register_rest_route( self::NAMESPACE, '/employees/(?P<id>\d+)', array(
+			array(
+				'methods'             => 'POST',
+				'callback'            => array( __CLASS__, 'update_employee' ),
+				'permission_callback' => array( __CLASS__, 'check_manager_permission' ),
+			)
+		) );
+
+		register_rest_route( self::NAMESPACE, '/employees/(?P<id>\d+)/reset-password', array(
+			'methods'             => 'POST',
+			'callback'            => array( __CLASS__, 'reset_employee_password' ),
+			'permission_callback' => array( __CLASS__, 'check_manager_permission' ),
+		) );
+
 		register_rest_route( self::NAMESPACE, '/employees/import', array(
 			'methods'             => 'POST',
 			'callback'            => array( __CLASS__, 'import_employees' ),
@@ -125,7 +139,7 @@ class VS_Rest_API {
 			'permission_callback' => array( __CLASS__, 'check_logged_in' ),
 		) );
 
-		// Wi-Fi Configuration endpoint
+		// Wi-Fi Configuration & Diagnostics endpoint
 		register_rest_route( self::NAMESPACE, '/wifi/config', array(
 			array(
 				'methods'             => 'GET',
@@ -137,6 +151,12 @@ class VS_Rest_API {
 				'callback'            => array( __CLASS__, 'save_wifi_config' ),
 				'permission_callback' => array( __CLASS__, 'check_admin_permission' ),
 			)
+		) );
+
+		register_rest_route( self::NAMESPACE, '/wifi/test', array(
+			'methods'             => 'POST',
+			'callback'            => array( __CLASS__, 'test_wifi_connection' ),
+			'permission_callback' => array( __CLASS__, 'check_manager_permission' ),
 		) );
 
 		// Audit Logs
@@ -172,13 +192,14 @@ class VS_Rest_API {
 		$employee = VS_Auth::get_current_employee();
 
 		return new WP_REST_Response( array(
-			'success'  => true,
-			'message'  => __( 'Login successful.', 'verification-system' ),
-			'user'     => array(
+			'success' => true,
+			'message' => __( 'Login successful.', 'verification-system' ),
+			'user'    => array(
 				'id'            => $res->ID,
 				'name'          => $res->display_name,
 				'role'          => $employee ? $employee->app_role : 'vs_employee',
 				'employee_code' => $employee ? $employee->employee_code : '',
+				'branch_id'     => $employee ? $employee->branch_id : 0,
 			),
 		), 200 );
 	}
@@ -207,9 +228,11 @@ class VS_Rest_API {
 			'success' => true,
 			'message' => __( 'OTP verification successful.', 'verification-system' ),
 			'user'    => array(
-				'id'   => $res->ID,
-				'name' => $res->display_name,
-				'role' => $employee ? $employee->app_role : 'vs_employee',
+				'id'            => $res->ID,
+				'name'          => $res->display_name,
+				'role'          => $employee ? $employee->app_role : 'vs_employee',
+				'employee_code' => $employee ? $employee->employee_code : '',
+				'branch_id'     => $employee ? $employee->branch_id : 0,
 			),
 		), 200 );
 	}
@@ -237,6 +260,7 @@ class VS_Rest_API {
 				'full_name'     => $employee->full_name,
 				'employee_code' => $employee->employee_code,
 				'app_role'      => $employee->app_role,
+				'branch_id'     => $employee->branch_id,
 				'branch_name'   => $branch ? $branch->name : 'Unassigned Branch',
 			),
 			'server_time' => current_time( 'Y-m-d H:i:s' ),
@@ -326,7 +350,33 @@ class VS_Rest_API {
 			return new WP_REST_Response( array( 'success' => false, 'message' => $res->get_error_message() ), 400 );
 		}
 
-		return new WP_REST_Response( array( 'success' => true, 'employee_id' => $res, 'message' => __( 'Employee account created successfully.', 'verification-system' ) ), 200 );
+		return new WP_REST_Response( array( 'success' => true, 'employee_id' => $res, 'message' => __( 'Account created successfully.', 'verification-system' ) ), 200 );
+	}
+
+	public static function update_employee( WP_REST_Request $request ) {
+		$id   = absint( $request->get_param( 'id' ) );
+		$data = $request->get_json_params();
+		$res  = VS_Employee::update_employee( $id, $data );
+
+		if ( is_wp_error( $res ) ) {
+			return new WP_REST_Response( array( 'success' => false, 'message' => $res->get_error_message() ), 400 );
+		}
+
+		return new WP_REST_Response( array( 'success' => true, 'message' => __( 'Account updated successfully.', 'verification-system' ) ), 200 );
+	}
+
+	public static function reset_employee_password( WP_REST_Request $request ) {
+		$id       = absint( $request->get_param( 'id' ) );
+		$params   = $request->get_json_params();
+		$password = isset( $params['password'] ) ? $params['password'] : '';
+
+		$res = VS_Employee::reset_password( $id, $password );
+
+		if ( is_wp_error( $res ) ) {
+			return new WP_REST_Response( array( 'success' => false, 'message' => $res->get_error_message() ), 400 );
+		}
+
+		return new WP_REST_Response( array( 'success' => true, 'message' => __( 'Password reset successfully.', 'verification-system' ) ), 200 );
 	}
 
 	public static function import_employees( WP_REST_Request $request ) {
@@ -417,15 +467,15 @@ class VS_Rest_API {
 		$existing = $wpdb->get_var( $wpdb->prepare( "SELECT id FROM {$config_table} WHERE branch_id = %d LIMIT 1", $branch_id ) );
 
 		$save_data = array(
-			'branch_id'     => $branch_id,
-			'config_name'   => sanitize_text_field( $params['config_name'] ),
-			'auth_type'     => sanitize_text_field( $params['auth_type'] ),
-			'ssid'          => sanitize_text_field( $params['ssid'] ),
-			'allowed_bssids'=> sanitize_textarea_field( $params['allowed_bssids'] ),
-			'shared_secret' => sanitize_text_field( $params['shared_secret'] ),
-			'api_endpoint'  => sanitize_text_field( $params['api_endpoint'] ),
-			'api_key'       => sanitize_text_field( $params['api_key'] ),
-			'is_active'     => absint( $params['is_active'] ),
+			'branch_id'            => $branch_id,
+			'config_name'          => sanitize_text_field( $params['config_name'] ),
+			'auth_type'            => sanitize_text_field( $params['auth_type'] ),
+			'ssid'                 => sanitize_text_field( $params['ssid'] ),
+			'allowed_bssids'       => sanitize_textarea_field( $params['allowed_bssids'] ),
+			'shared_secret'        => sanitize_text_field( $params['shared_secret'] ),
+			'api_endpoint'         => sanitize_text_field( $params['api_endpoint'] ),
+			'api_key'              => sanitize_text_field( $params['api_key'] ),
+			'is_active'            => absint( $params['is_active'] ),
 		);
 
 		if ( $existing ) {
@@ -436,6 +486,14 @@ class VS_Rest_API {
 		}
 
 		return new WP_REST_Response( array( 'success' => true, 'message' => __( 'Wi-Fi configuration saved successfully.', 'verification-system' ) ), 200 );
+	}
+
+	public static function test_wifi_connection( WP_REST_Request $request ) {
+		$params    = $request->get_json_params();
+		$branch_id = absint( $params['branch_id'] );
+
+		$res = VS_WiFi::test_controller_connection( $branch_id );
+		return new WP_REST_Response( $res, 200 );
 	}
 
 	public static function get_audit_logs( WP_REST_Request $request ) {

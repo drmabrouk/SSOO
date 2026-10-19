@@ -7,11 +7,12 @@
 - Interface Language: English
 
 ## Initial Setup Workflow
-1. **Branch Configuration**: Create organizational branches (e.g., Dubai Main Branch, Abu Dhabi Campus).
-2. **Wi-Fi Network Setup**:
-   - Set up the Wi-Fi authentication mode (`hmac_token` or `meraki`).
-   - Define the approved Workplace SSID and Shared Secret Key.
-3. **Employee Management**:
-   - Add employees manually or import in bulk using CSV format (`Employee ID, Full Name, Phone Number, Email, Department, Job Title, Branch ID`).
-4. **Schedules & Policies**:
+1. **Application Page**: Published automatically at `/verification-system`. Displays the SPA canvas with a floating panel left sidebar.
+2. **Branch Configuration**: Create organizational branches and assign Branch Managers.
+3. **Branch-Specific Wi-Fi Network Setup**:
+   - Configure SSID, multi-AP BSSID lists, shared secrets, or Cisco Meraki API parameters for each branch.
+   - Run **Test Controller Connection** to verify network controller diagnostics.
+4. **General Manager & Account Management**:
+   - General Managers and System Admins can create and edit Branch Managers and Employees, reset passwords, and suspend accounts.
+5. **Schedules & Policies**:
    - Define shift start/end times, grace period (default 15 mins), and late thresholds.

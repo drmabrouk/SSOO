@@ -9,4 +9,4 @@
 
 2. **Cisco Meraki Enterprise Wireless Controller API** (Optional for Meraki Wi-Fi Mode)
    - *Requirement*: Cisco Meraki Dashboard API Key and Endpoint URL.
-   - *Note*: HMAC Signed Token mode requires no external API subscriptions and works with local network portals.
+   - *Diagnostics*: Built-in diagnostic test endpoint (`/wifi/test`) validates controller reachability.

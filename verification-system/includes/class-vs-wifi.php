@@ -40,8 +40,9 @@ class VS_WiFi_HMAC_Adapter implements VS_WiFi_Adapter_Interface {
 			);
 		}
 
-		// Replay Attack Protection: Token must be within 3 minutes (180s)
-		if ( abs( time() - $timestamp ) > 180 ) {
+		// Replay Attack Protection: Token must be within configured expiration limit (default 180s)
+		$timeout = ! empty( $wifi_config->verification_timeout ) ? absint( $wifi_config->verification_timeout ) : 180;
+		if ( abs( time() - $timestamp ) > $timeout ) {
 			return array(
 				'success' => false,
 				'code'    => 'token_expired',
@@ -56,6 +57,18 @@ class VS_WiFi_HMAC_Adapter implements VS_WiFi_Adapter_Interface {
 				'code'    => 'invalid_ssid',
 				'message' => sprintf( __( 'Connected Wi-Fi (%s) does not match the approved branch workplace network (%s).', 'verification-system' ), $ssid, $wifi_config->ssid ),
 			);
+		}
+
+		// Validate Multi-AP BSSID list if specified
+		if ( ! empty( $wifi_config->allowed_bssids ) && ! empty( $bssid ) ) {
+			$allowed = array_map( 'trim', explode( "\n", strtolower( $wifi_config->allowed_bssids ) ) );
+			if ( ! in_array( strtolower( $bssid ), $allowed, true ) ) {
+				return array(
+					'success' => false,
+					'code'    => 'invalid_bssid',
+					'message' => sprintf( __( 'Connected Access Point BSSID (%s) is not in the approved branch access point list.', 'verification-system' ), $bssid ),
+				);
+			}
 		}
 
 		// Validate HMAC signature
@@ -97,7 +110,6 @@ class VS_WiFi_Meraki_Adapter implements VS_WiFi_Adapter_Interface {
 			);
 		}
 
-		// Query Meraki API server-side
 		$response = wp_remote_get( rtrim( $endpoint, '/' ) . '/clients/' . urlencode( $client_ip ), array(
 			'headers' => array(
 				'X-Cisco-Meraki-API-Key' => $api_key,
@@ -185,7 +197,16 @@ class VS_WiFi {
 
 		$result = $adapter->verify( $employee, $payload, $wifi_config );
 
-		// 4. Log verification outcome
+		// 4. Update last successful verification timestamp on success
+		if ( $result['success'] ) {
+			$wpdb->update(
+				$config_table,
+				array( 'last_verification' => current_time( 'mysql' ) ),
+				array( 'id' => $wifi_config->id )
+			);
+		}
+
+		// 5. Log verification outcome
 		self::log_verification(
 			$employee->id,
 			$employee->branch_id,
@@ -196,6 +217,75 @@ class VS_WiFi {
 		);
 
 		return $result;
+	}
+
+	/**
+	 * Test network controller connectivity for administrative diagnostics.
+	 *
+	 * @param int $branch_id Branch ID.
+	 * @return array Diagnostic test result.
+	 */
+	public static function test_controller_connection( $branch_id ) {
+		global $wpdb;
+
+		$config_table = $wpdb->prefix . 'vs_wifi_configs';
+		$wifi_config  = $wpdb->get_row(
+			$wpdb->prepare( "SELECT * FROM {$config_table} WHERE branch_id = %d LIMIT 1", $branch_id )
+		);
+
+		if ( ! $wifi_config ) {
+			return array(
+				'success' => false,
+				'message' => __( 'No Wi-Fi configuration saved for this branch.', 'verification-system' ),
+			);
+		}
+
+		if ( 'meraki' === $wifi_config->auth_type ) {
+			if ( empty( $wifi_config->api_endpoint ) || empty( $wifi_config->api_key ) ) {
+				return array(
+					'success' => false,
+					'message' => __( 'Cisco Meraki API endpoint or API key is missing.', 'verification-system' ),
+				);
+			}
+
+			$response = wp_remote_get( rtrim( $wifi_config->api_endpoint, '/' ) . '/organizations', array(
+				'headers' => array( 'X-Cisco-Meraki-API-Key' => $wifi_config->api_key ),
+				'timeout' => 5,
+			) );
+
+			if ( is_wp_error( $response ) ) {
+				return array(
+					'success' => false,
+					'message' => __( 'Failed to reach Cisco Meraki controller: ', 'verification-system' ) . $response->get_error_message(),
+				);
+			}
+
+			$code = wp_remote_retrieve_response_code( $response );
+			if ( $code >= 200 && $code < 300 ) {
+				return array(
+					'success' => true,
+					'message' => __( 'Cisco Meraki Network Controller is online and authenticated.', 'verification-system' ),
+				);
+			}
+
+			return array(
+				'success' => false,
+				'message' => sprintf( __( 'Controller returned HTTP status code %d.', 'verification-system' ), $code ),
+			);
+		}
+
+		// HMAC Token Mode Diagnostic
+		if ( empty( $wifi_config->shared_secret ) ) {
+			return array(
+				'success' => false,
+				'message' => __( 'Shared secret key is required for HMAC Token mode.', 'verification-system' ),
+			);
+		}
+
+		return array(
+			'success' => true,
+			'message' => __( 'HMAC Token Verification Engine is active and ready for branch SSID: ', 'verification-system' ) . $wifi_config->ssid,
+		);
 	}
 
 	/**
