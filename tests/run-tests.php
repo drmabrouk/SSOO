@@ -45,7 +45,13 @@ class WPDB_Mock {
 		return 'DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci';
 	}
 	public function prepare( $query, ...$args ) {
+		if ( isset( $args[0] ) && is_array( $args[0] ) ) {
+			$args = $args[0];
+		}
 		return sprintf( str_replace( '%s', "'%s'", str_replace( '%d', '%d', $query ) ), ...$args );
+	}
+	public function esc_like( $text ) {
+		return addcslashes( $text, '_%\\' );
 	}
 	public function get_var( $query ) {
 		return null;
@@ -73,6 +79,13 @@ class WPDB_Mock {
 	}
 }
 
+class WP_User_Mock {
+	public $ID = 1;
+	public $display_name = 'Test General Manager';
+	public $roles = array( 'vs_general_manager' );
+	public function exists() { return true; }
+}
+
 global $wpdb;
 $wpdb = new WPDB_Mock();
 
@@ -86,14 +99,15 @@ function wp_hash_password( $pass ) { return md5( $pass ); }
 function wp_check_password( $pass, $hash ) { return md5( $pass ) === $hash; }
 function wp_set_password( $pass, $user_id ) { return true; }
 function current_time( $type ) { return date( 'Y-m-d H:i:s' ); }
-function wp_get_current_user() { return (object) array( 'ID' => 1, 'display_name' => 'Test General Manager', 'roles' => array( 'vs_general_manager' ) ); }
+function wp_get_current_user() { return new WP_User_Mock(); }
 function get_current_user_id() { return 1; }
-function current_user_can( $cap ) { return true; }
+function current_user_can( $cap ) { return false; }
 function sanitize_text_field( $str ) { return trim( strip_tags( $str ) ); }
 function sanitize_email( $email ) { return trim( $email ); }
 function sanitize_textarea_field( $str ) { return trim( $str ); }
 function wp_json_encode( $data ) { return json_encode( $data ); }
 function absint( $val ) { return abs( (int) $val ); }
+function user_can( $user, $cap ) { return false; }
 
 class VS_Test_Runner {
 
@@ -109,6 +123,7 @@ class VS_Test_Runner {
 		$this->test_schedule_calculations();
 		$this->test_audit_sanitization();
 		$this->test_wifi_diagnostics();
+		$this->test_role_sanitization();
 
 		echo "\n=============================================\n";
 		echo "Total Passed: {$this->passed}\n";
@@ -208,6 +223,12 @@ class VS_Test_Runner {
 		echo "\n--- Testing Wi-Fi Controller Diagnostics ---\n";
 		$diag = VS_WiFi::test_controller_connection( 1 );
 		$this->assert( isset( $diag['success'] ), 'Wi-Fi controller test endpoint returns structured status' );
+	}
+
+	private function test_role_sanitization() {
+		echo "\n--- Testing Privilege Escalation Prevention ---\n";
+		$role = VS_Employee::sanitize_app_role( 'administrator' );
+		$this->assert( $role === 'vs_employee', 'Non-system admin cannot escalate privileges to administrator' );
 	}
 }
 

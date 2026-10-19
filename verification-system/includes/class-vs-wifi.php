@@ -50,7 +50,7 @@ class VS_WiFi_HMAC_Adapter implements VS_WiFi_Adapter_Interface {
 			);
 		}
 
-		// Validate SSID matches configuration
+		// Validate SSID matches branch configuration
 		if ( ! empty( $wifi_config->ssid ) && strcasecmp( $ssid, $wifi_config->ssid ) !== 0 ) {
 			return array(
 				'success' => false,
@@ -146,7 +146,7 @@ class VS_WiFi_Meraki_Adapter implements VS_WiFi_Adapter_Interface {
 class VS_WiFi {
 
 	/**
-	 * Perform Wi-Fi verification fail-closed.
+	 * Perform Wi-Fi verification fail-closed against the employee's assigned branch network.
 	 *
 	 * @param object $employee Employee object.
 	 * @param array  $payload Verification parameters from client request.
@@ -156,7 +156,7 @@ class VS_WiFi {
 	public static function verify_connection( $employee, $payload, $exception_override = false ) {
 		global $wpdb;
 
-		// 1. If exception override is requested by an authorized manager
+		// 1. Administrative Exception Override
 		if ( $exception_override ) {
 			if ( current_user_can( 'administrator' ) || VS_Roles::is_general_manager() || VS_Roles::is_branch_manager() ) {
 				self::log_verification( $employee->id, $employee->branch_id, 'OVERRIDE', 'SUCCESS', 'Administrative override granted.', $payload );
@@ -168,7 +168,7 @@ class VS_WiFi {
 			}
 		}
 
-		// 2. Fetch Wi-Fi configuration for branch
+		// 2. Fetch Wi-Fi configuration mapped to employee's assigned branch
 		$config_table = $wpdb->prefix . 'vs_wifi_configs';
 		$wifi_config  = $wpdb->get_row(
 			$wpdb->prepare( "SELECT * FROM {$config_table} WHERE branch_id = %d AND is_active = 1 LIMIT 1", $employee->branch_id )

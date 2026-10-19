@@ -72,7 +72,7 @@ class VS_Rest_API {
 			'permission_callback' => array( __CLASS__, 'check_logged_in' ),
 		) );
 
-		// Employees CRUD
+		// Employees CRUD & Search
 		register_rest_route( self::NAMESPACE, '/employees', array(
 			array(
 				'methods'             => 'GET',
@@ -97,6 +97,12 @@ class VS_Rest_API {
 		register_rest_route( self::NAMESPACE, '/employees/(?P<id>\d+)/reset-password', array(
 			'methods'             => 'POST',
 			'callback'            => array( __CLASS__, 'reset_employee_password' ),
+			'permission_callback' => array( __CLASS__, 'check_manager_permission' ),
+		) );
+
+		register_rest_route( self::NAMESPACE, '/employees/import-template', array(
+			'methods'             => 'GET',
+			'callback'            => array( __CLASS__, 'download_import_template' ),
 			'permission_callback' => array( __CLASS__, 'check_manager_permission' ),
 		) );
 
@@ -324,20 +330,14 @@ class VS_Rest_API {
 	}
 
 	public static function get_employees( WP_REST_Request $request ) {
-		global $wpdb;
-		$emp_table    = $wpdb->prefix . 'vs_employees';
-		$branch_table = $wpdb->prefix . 'vs_branches';
+		$args = array(
+			'search'    => sanitize_text_field( $request->get_param( 'search' ) ),
+			'role'      => sanitize_text_field( $request->get_param( 'role' ) ),
+			'branch_id' => absint( $request->get_param( 'branch_id' ) ),
+			'status'    => sanitize_text_field( $request->get_param( 'status' ) ),
+		);
 
-		$user  = wp_get_current_user();
-		$where = "WHERE 1=1";
-
-		if ( VS_Roles::is_branch_manager( $user ) ) {
-			$emp   = VS_Auth::get_current_employee();
-			$b_id  = $emp ? $emp->branch_id : 0;
-			$where .= $wpdb->prepare( " AND e.branch_id = %d", $b_id );
-		}
-
-		$employees = $wpdb->get_results( "SELECT e.*, b.name as branch_name FROM {$emp_table} e LEFT JOIN {$branch_table} b ON e.branch_id = b.id {$where} ORDER BY e.id DESC" );
+		$employees = VS_Employee::search_employees( $args );
 
 		return new WP_REST_Response( array( 'success' => true, 'employees' => $employees ), 200 );
 	}
@@ -377,6 +377,14 @@ class VS_Rest_API {
 		}
 
 		return new WP_REST_Response( array( 'success' => true, 'message' => __( 'Password reset successfully.', 'verification-system' ) ), 200 );
+	}
+
+	public static function download_import_template() {
+		$csv_template = VS_Employee::get_import_template_csv();
+		header( 'Content-Type: text/csv; charset=utf-8' );
+		header( 'Content-Disposition: attachment; filename=employee-import-template.csv' );
+		echo $csv_template;
+		exit;
 	}
 
 	public static function import_employees( WP_REST_Request $request ) {
@@ -447,9 +455,19 @@ class VS_Rest_API {
 		$branch_id    = absint( $request->get_param( 'branch_id' ) );
 		$config_table = $wpdb->prefix . 'vs_wifi_configs';
 
+		if ( ! VS_Branch::can_manage_branch( $branch_id ) ) {
+			return new WP_REST_Response( array( 'success' => false, 'message' => __( 'Permission denied to view network configuration for this branch.', 'verification-system' ) ), 403 );
+		}
+
 		$config = $wpdb->get_row(
 			$wpdb->prepare( "SELECT * FROM {$config_table} WHERE branch_id = %d LIMIT 1", $branch_id )
 		);
+
+		if ( $config ) {
+			// Redact sensitive secrets in REST responses
+			$config->shared_secret = ! empty( $config->shared_secret ) ? '••••••••' : '';
+			$config->api_key       = ! empty( $config->api_key ) ? '••••••••' : '';
+		}
 
 		return new WP_REST_Response( array( 'success' => true, 'config' => $config ), 200 );
 	}
@@ -464,22 +482,36 @@ class VS_Rest_API {
 			return new WP_REST_Response( array( 'success' => false, 'message' => __( 'Branch ID is required.', 'verification-system' ) ), 400 );
 		}
 
-		$existing = $wpdb->get_var( $wpdb->prepare( "SELECT id FROM {$config_table} WHERE branch_id = %d LIMIT 1", $branch_id ) );
+		if ( ! VS_Branch::can_manage_branch( $branch_id ) ) {
+			return new WP_REST_Response( array( 'success' => false, 'message' => __( 'Permission denied to modify Wi-Fi settings for this branch.', 'verification-system' ) ), 403 );
+		}
+
+		$existing = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$config_table} WHERE branch_id = %d LIMIT 1", $branch_id ) );
+
+		$shared_secret = sanitize_text_field( $params['shared_secret'] );
+		if ( '••••••••' === $shared_secret && $existing ) {
+			$shared_secret = $existing->shared_secret;
+		}
+
+		$api_key = sanitize_text_field( $params['api_key'] );
+		if ( '••••••••' === $api_key && $existing ) {
+			$api_key = $existing->api_key;
+		}
 
 		$save_data = array(
-			'branch_id'            => $branch_id,
-			'config_name'          => sanitize_text_field( $params['config_name'] ),
-			'auth_type'            => sanitize_text_field( $params['auth_type'] ),
-			'ssid'                 => sanitize_text_field( $params['ssid'] ),
-			'allowed_bssids'       => sanitize_textarea_field( $params['allowed_bssids'] ),
-			'shared_secret'        => sanitize_text_field( $params['shared_secret'] ),
-			'api_endpoint'         => sanitize_text_field( $params['api_endpoint'] ),
-			'api_key'              => sanitize_text_field( $params['api_key'] ),
-			'is_active'            => absint( $params['is_active'] ),
+			'branch_id'      => $branch_id,
+			'config_name'    => sanitize_text_field( $params['config_name'] ),
+			'auth_type'      => sanitize_text_field( $params['auth_type'] ),
+			'ssid'           => sanitize_text_field( $params['ssid'] ),
+			'allowed_bssids' => sanitize_textarea_field( $params['allowed_bssids'] ),
+			'shared_secret'  => $shared_secret,
+			'api_endpoint'   => sanitize_text_field( $params['api_endpoint'] ),
+			'api_key'        => $api_key,
+			'is_active'      => absint( $params['is_active'] ),
 		);
 
 		if ( $existing ) {
-			$wpdb->update( $config_table, $save_data, array( 'id' => $existing ) );
+			$wpdb->update( $config_table, $save_data, array( 'id' => $existing->id ) );
 		} else {
 			$save_data['created_at'] = current_time( 'mysql' );
 			$wpdb->insert( $config_table, $save_data );
@@ -492,15 +524,22 @@ class VS_Rest_API {
 		$params    = $request->get_json_params();
 		$branch_id = absint( $params['branch_id'] );
 
+		if ( ! VS_Branch::can_manage_branch( $branch_id ) ) {
+			return new WP_REST_Response( array( 'success' => false, 'message' => __( 'Permission denied to test controller connection for this branch.', 'verification-system' ) ), 403 );
+		}
+
 		$res = VS_WiFi::test_controller_connection( $branch_id );
 		return new WP_REST_Response( $res, 200 );
 	}
 
 	public static function get_audit_logs( WP_REST_Request $request ) {
 		$args = array(
-			'branch_id' => absint( $request->get_param( 'branch_id' ) ),
-			'action'    => sanitize_text_field( $request->get_param( 'action' ) ),
-			'limit'     => absint( $request->get_param( 'limit' ) ? $request->get_param( 'limit' ) : 50 ),
+			'branch_id'  => absint( $request->get_param( 'branch_id' ) ),
+			'action'     => sanitize_text_field( $request->get_param( 'action' ) ),
+			'search'     => sanitize_text_field( $request->get_param( 'search' ) ),
+			'start_date' => sanitize_text_field( $request->get_param( 'start_date' ) ),
+			'end_date'   => sanitize_text_field( $request->get_param( 'end_date' ) ),
+			'limit'      => absint( $request->get_param( 'limit' ) ? $request->get_param( 'limit' ) : 50 ),
 		);
 
 		$logs = VS_Audit::get_logs( $args );

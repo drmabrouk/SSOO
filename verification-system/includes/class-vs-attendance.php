@@ -12,7 +12,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 class VS_Attendance {
 
 	/**
-	 * Process Employee Check-In.
+	 * Process Employee Check-In using server clock in Asia/Dubai timezone.
 	 *
 	 * @param object $employee Employee record.
 	 * @param array  $wifi_payload Wi-Fi payload data.
@@ -26,8 +26,11 @@ class VS_Attendance {
 			return new WP_Error( 'inactive_account', __( 'Your employee account is inactive or suspended.', 'verification-system' ) );
 		}
 
-		$today = current_time( 'Y-m-d' );
-		$now   = current_time( 'mysql' );
+		// Ensure Asia/Dubai timezone for official server clock timestamps
+		$timezone = new DateTimeZone( 'Asia/Dubai' );
+		$now_dt   = new DateTime( 'now', $timezone );
+		$today    = $now_dt->format( 'Y-m-d' );
+		$now      = $now_dt->format( 'Y-m-d H:i:s' );
 
 		$session_table = $wpdb->prefix . 'vs_attendance_sessions';
 		$event_table   = $wpdb->prefix . 'vs_attendance_events';
@@ -133,12 +136,12 @@ class VS_Attendance {
 			'check_in_time'    => $now,
 			'is_late'          => (bool) $metrics['is_late'],
 			'lateness_minutes' => $metrics['lateness_minutes'],
-			'message'          => __( 'Check-in recorded successfully.', 'verification-system' ),
+			'message'          => __( 'Attendance successfully recorded.', 'verification-system' ),
 		);
 	}
 
 	/**
-	 * Process Employee Check-Out.
+	 * Process Employee Check-Out using server clock in Asia/Dubai timezone.
 	 *
 	 * @param object $employee Employee record.
 	 * @param array  $wifi_payload Wi-Fi payload data.
@@ -148,8 +151,10 @@ class VS_Attendance {
 	public static function check_out( $employee, $wifi_payload = array(), $exception_override = false ) {
 		global $wpdb;
 
-		$today = current_time( 'Y-m-d' );
-		$now   = current_time( 'mysql' );
+		$timezone = new DateTimeZone( 'Asia/Dubai' );
+		$now_dt   = new DateTime( 'now', $timezone );
+		$today    = $now_dt->format( 'Y-m-d' );
+		$now      = $now_dt->format( 'Y-m-d H:i:s' );
 
 		$session_table = $wpdb->prefix . 'vs_attendance_sessions';
 		$event_table   = $wpdb->prefix . 'vs_attendance_events';
@@ -251,12 +256,12 @@ class VS_Attendance {
 			'overtime_minutes'        => $metrics['overtime_minutes'],
 			'is_early_departure'      => (bool) $metrics['is_early_departure'],
 			'early_departure_minutes' => $metrics['early_departure_minutes'],
-			'message'                 => __( 'Check-out recorded successfully.', 'verification-system' ),
+			'message'                 => __( 'Departure recorded successfully.', 'verification-system' ),
 		);
 	}
 
 	/**
-	 * Get current attendance status for an employee.
+	 * Get current attendance status for an employee using Asia/Dubai timezone.
 	 *
 	 * @param int $employee_id Employee ID.
 	 * @return array Attendance state array.
@@ -264,8 +269,10 @@ class VS_Attendance {
 	public static function get_today_status( $employee_id ) {
 		global $wpdb;
 
-		$today = current_time( 'Y-m-d' );
-		$table = $wpdb->prefix . 'vs_attendance_sessions';
+		$timezone = new DateTimeZone( 'Asia/Dubai' );
+		$now_dt   = new DateTime( 'now', $timezone );
+		$today    = $now_dt->format( 'Y-m-d' );
+		$table    = $wpdb->prefix . 'vs_attendance_sessions';
 
 		$session = $wpdb->get_row(
 			$wpdb->prepare(

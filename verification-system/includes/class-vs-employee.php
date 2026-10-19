@@ -12,6 +12,74 @@ if ( ! defined( 'ABSPATH' ) ) {
 class VS_Employee {
 
 	/**
+	 * Search and list employees with role, branch, and status filters.
+	 *
+	 * @param array $args Query parameters.
+	 * @return array Array of employee records with branch details.
+	 */
+	public static function search_employees( $args = array() ) {
+		global $wpdb;
+
+		$emp_table    = $wpdb->prefix . 'vs_employees';
+		$branch_table = $wpdb->prefix . 'vs_branches';
+
+		$user  = wp_get_current_user();
+		$where = "WHERE 1=1";
+
+		if ( VS_Roles::is_branch_manager( $user ) ) {
+			$emp   = VS_Auth::get_current_employee();
+			$b_id  = $emp ? $emp->branch_id : 0;
+			$where .= $wpdb->prepare( " AND e.branch_id = %d", $b_id );
+		} elseif ( ! empty( $args['branch_id'] ) && VS_Branch::can_manage_branch( $args['branch_id'] ) ) {
+			$where .= $wpdb->prepare( " AND e.branch_id = %d", absint( $args['branch_id'] ) );
+		}
+
+		if ( ! empty( $args['search'] ) ) {
+			$search_term = '%' . $wpdb->esc_like( sanitize_text_field( $args['search'] ) ) . '%';
+			$where      .= $wpdb->prepare( " AND (e.full_name LIKE %s OR e.employee_code LIKE %s OR e.phone_number LIKE %s OR e.email LIKE %s)", $search_term, $search_term, $search_term, $search_term );
+		}
+
+		if ( ! empty( $args['role'] ) ) {
+			$where .= $wpdb->prepare( " AND e.app_role = %s", sanitize_text_field( $args['role'] ) );
+		}
+
+		if ( ! empty( $args['status'] ) ) {
+			$where .= $wpdb->prepare( " AND e.status = %s", sanitize_text_field( $args['status'] ) );
+		}
+
+		$query = "SELECT e.*, b.name as branch_name
+			FROM {$emp_table} e
+			LEFT JOIN {$branch_table} b ON e.branch_id = b.id
+			{$where}
+			ORDER BY e.id DESC";
+
+		return $wpdb->get_results( $query );
+	}
+
+	/**
+	 * Filter allowed application role to prevent privilege escalation.
+	 *
+	 * @param string $requested_role Target role slug.
+	 * @return string Permitted role slug.
+	 */
+	public static function sanitize_app_role( $requested_role ) {
+		$allowed_roles = array( VS_Roles::ROLE_EMPLOYEE, VS_Roles::ROLE_BR_MGR );
+
+		// Only System Administrator can assign General Manager or Administrator roles
+		if ( VS_Roles::is_system_admin() ) {
+			$allowed_roles[] = VS_Roles::ROLE_GEN_MGR;
+			$allowed_roles[] = VS_Roles::ROLE_SYS_ADMIN;
+			$allowed_roles[] = 'administrator';
+		}
+
+		if ( in_array( $requested_role, $allowed_roles, true ) ) {
+			return $requested_role;
+		}
+
+		return VS_Roles::ROLE_EMPLOYEE;
+	}
+
+	/**
 	 * Create employee account and WP User mapping.
 	 *
 	 * @param array $data Employee parameters.
@@ -25,7 +93,8 @@ class VS_Employee {
 		$employee_code = isset( $data['employee_code'] ) ? sanitize_text_field( $data['employee_code'] ) : '';
 		$email         = isset( $data['email'] ) ? sanitize_email( $data['email'] ) : '';
 		$branch_id     = isset( $data['branch_id'] ) ? absint( $data['branch_id'] ) : 0;
-		$app_role      = isset( $data['app_role'] ) ? sanitize_text_field( $data['app_role'] ) : VS_Roles::ROLE_EMPLOYEE;
+		$raw_role      = isset( $data['app_role'] ) ? sanitize_text_field( $data['app_role'] ) : VS_Roles::ROLE_EMPLOYEE;
+		$app_role      = self::sanitize_app_role( $raw_role );
 		$password      = isset( $data['password'] ) && ! empty( $data['password'] ) ? $data['password'] : wp_generate_password( 12, true );
 
 		if ( empty( $full_name ) || empty( $phone_number ) || empty( $employee_code ) || empty( $branch_id ) ) {
@@ -156,7 +225,7 @@ class VS_Employee {
 			$update_data['status'] = sanitize_text_field( $data['status'] );
 		}
 		if ( isset( $data['app_role'] ) ) {
-			$update_data['app_role'] = sanitize_text_field( $data['app_role'] );
+			$update_data['app_role'] = self::sanitize_app_role( sanitize_text_field( $data['app_role'] ) );
 			if ( $employee->user_id ) {
 				$user = get_user_by( 'id', $employee->user_id );
 				if ( $user ) {
@@ -246,6 +315,24 @@ class VS_Employee {
 		return $wpdb->get_row(
 			$wpdb->prepare( "SELECT * FROM {$table} WHERE id = %d LIMIT 1", $employee_id )
 		);
+	}
+
+	/**
+	 * Generate sample CSV template string for bulk import.
+	 *
+	 * @return string CSV text content.
+	 */
+	public static function get_import_template_csv() {
+		$output = fopen( 'php://temp', 'r+' );
+		fputcsv( $output, array( 'Employee ID', 'Full Name', 'Phone Number', 'Email', 'Department', 'Job Title', 'Branch ID' ) );
+		fputcsv( $output, array( 'EMP-1001', 'Ahmed Al-Mansoori', '+971501234567', 'ahmed@example.com', 'Operations', 'Senior Supervisor', '1' ) );
+		fputcsv( $output, array( 'EMP-1002', 'Fatima Saeed', '+971529876543', 'fatima@example.com', 'Administration', 'HR Officer', '1' ) );
+
+		rewind( $output );
+		$csv_data = stream_get_contents( $output );
+		fclose( $output );
+
+		return $csv_data;
 	}
 
 	/**

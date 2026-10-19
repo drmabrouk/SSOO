@@ -12,7 +12,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 class VS_Branch {
 
 	/**
-	 * Create a new branch.
+	 * Create a new branch with timezone, address, contact, and network configuration.
 	 *
 	 * @param array $data Branch data fields.
 	 * @return int|WP_Error Branch ID or WP_Error on failure.
@@ -56,6 +56,26 @@ class VS_Branch {
 		$branch_id = $wpdb->insert_id;
 
 		if ( $branch_id ) {
+			// Save optional initial Wi-Fi network configuration for the new branch if provided
+			if ( ! empty( $data['wifi_ssid'] ) ) {
+				$wifi_table = $wpdb->prefix . 'vs_wifi_configs';
+				$wpdb->insert(
+					$wifi_table,
+					array(
+						'branch_id'      => $branch_id,
+						'config_name'    => $name . ' Approved Wi-Fi',
+						'auth_type'      => isset( $data['wifi_auth_type'] ) ? sanitize_text_field( $data['wifi_auth_type'] ) : 'hmac_token',
+						'ssid'           => sanitize_text_field( $data['wifi_ssid'] ),
+						'allowed_bssids' => isset( $data['wifi_bssids'] ) ? sanitize_textarea_field( $data['wifi_bssids'] ) : '',
+						'shared_secret'  => isset( $data['wifi_secret'] ) ? sanitize_text_field( $data['wifi_secret'] ) : '',
+						'api_endpoint'   => isset( $data['wifi_endpoint'] ) ? sanitize_text_field( $data['wifi_endpoint'] ) : '',
+						'api_key'        => isset( $data['wifi_key'] ) ? sanitize_text_field( $data['wifi_key'] ) : '',
+						'is_active'      => 1,
+						'created_at'     => current_time( 'mysql' ),
+					)
+				);
+			}
+
 			VS_Audit::log_event(
 				get_current_user_id(),
 				wp_get_current_user()->display_name,
@@ -107,22 +127,20 @@ class VS_Branch {
 			$update_data['is_active'] = absint( $data['is_active'] );
 		}
 
-		if ( empty( $update_data ) ) {
-			return true;
+		if ( ! empty( $update_data ) ) {
+			$wpdb->update( $table, $update_data, array( 'id' => $branch_id ) );
+
+			VS_Audit::log_event(
+				get_current_user_id(),
+				wp_get_current_user()->display_name,
+				'manager',
+				'update_branch',
+				'branch',
+				$branch_id,
+				$branch_id,
+				$update_data
+			);
 		}
-
-		$wpdb->update( $table, $update_data, array( 'id' => $branch_id ) );
-
-		VS_Audit::log_event(
-			get_current_user_id(),
-			wp_get_current_user()->display_name,
-			'manager',
-			'update_branch',
-			'branch',
-			$branch_id,
-			$branch_id,
-			$update_data
-		);
 
 		return true;
 	}

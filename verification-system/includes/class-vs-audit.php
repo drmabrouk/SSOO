@@ -75,7 +75,7 @@ class VS_Audit {
 	}
 
 	/**
-	 * Get audit logs with filters and authorization check.
+	 * Get audit logs using single $wpdb->prepare call to avoid double-prepare formatting bugs.
 	 *
 	 * @param array $args Query filters.
 	 * @return array Array of audit log rows.
@@ -83,34 +83,55 @@ class VS_Audit {
 	public static function get_logs( $args = array() ) {
 		global $wpdb;
 
-		$table = $wpdb->prefix . 'vs_audit_logs';
-		$user  = wp_get_current_user();
+		$table  = $wpdb->prefix . 'vs_audit_logs';
+		$user   = wp_get_current_user();
 
-		$where = 'WHERE 1=1';
+		$where  = 'WHERE 1=1';
+		$params = array();
 
 		// Branch Manager isolation
 		if ( VS_Roles::is_branch_manager( $user ) ) {
 			$employee = VS_Auth::get_current_employee();
 			$b_id     = $employee ? $employee->branch_id : 0;
-			$where   .= $wpdb->prepare( ' AND branch_id = %d', $b_id );
+			$where   .= ' AND branch_id = %d';
+			$params[] = $b_id;
 		} elseif ( ! VS_Roles::is_system_admin( $user ) && ! VS_Roles::is_general_manager( $user ) ) {
 			// Employee can only see their own logs
-			$where .= $wpdb->prepare( ' AND user_id = %d', $user->ID );
+			$where   .= ' AND user_id = %d';
+			$params[] = $user->ID;
 		}
 
 		if ( ! empty( $args['branch_id'] ) && VS_Branch::can_manage_branch( $args['branch_id'] ) ) {
-			$where .= $wpdb->prepare( ' AND branch_id = %d', absint( $args['branch_id'] ) );
+			$where   .= ' AND branch_id = %d';
+			$params[] = absint( $args['branch_id'] );
 		}
 
 		if ( ! empty( $args['action'] ) ) {
-			$where .= $wpdb->prepare( ' AND action = %s', sanitize_text_field( $args['action'] ) );
+			$where   .= ' AND action = %s';
+			$params[] = sanitize_text_field( $args['action'] );
 		}
 
-		$limit  = isset( $args['limit'] ) ? absint( $args['limit'] ) : 50;
-		$offset = isset( $args['offset'] ) ? absint( $args['offset'] ) : 0;
+		if ( ! empty( $args['search'] ) ) {
+			$search_term = '%' . $wpdb->esc_like( sanitize_text_field( $args['search'] ) ) . '%';
+			$where      .= ' AND (actor_name LIKE %s OR action LIKE %s OR ip_address LIKE %s)';
+			$params[]    = $search_term;
+			$params[]    = $search_term;
+			$params[]    = $search_term;
+		}
 
-		return $wpdb->get_results(
-			$wpdb->prepare( "SELECT * FROM {$table} {$where} ORDER BY id DESC LIMIT %d OFFSET %d", $limit, $offset )
-		);
+		if ( ! empty( $args['start_date'] ) && ! empty( $args['end_date'] ) ) {
+			$where   .= ' AND created_at BETWEEN %s AND %s';
+			$params[] = sanitize_text_field( $args['start_date'] ) . ' 00:00:00';
+			$params[] = sanitize_text_field( $args['end_date'] ) . ' 23:59:59';
+		}
+
+		$limit    = isset( $args['limit'] ) ? absint( $args['limit'] ) : 50;
+		$offset   = isset( $args['offset'] ) ? absint( $args['offset'] ) : 0;
+		$params[] = $limit;
+		$params[] = $offset;
+
+		$sql = "SELECT * FROM {$table} {$where} ORDER BY id DESC LIMIT %d OFFSET %d";
+
+		return $wpdb->get_results( $wpdb->prepare( $sql, $params ) );
 	}
 }

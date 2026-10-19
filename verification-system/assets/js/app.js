@@ -1,4 +1,4 @@
-/* Verification System – Single Page Frontend Application Engine with Floating Left Sidebar */
+/* Verification System – Single Page Frontend Application Engine with LTR Layout & Floating Left Sidebar */
 
 (function () {
 	'use strict';
@@ -15,12 +15,14 @@
 			auditLogs: [],
 			wifiConfig: null,
 			selectedBranchId: 0,
+			empSearch: '',
+			empRoleFilter: '',
+			auditSearch: '',
 		},
 
 		init: function () {
 			this.state.user = this.config.user;
 
-			// Handle hash-based SPA routing
 			const initialHash = window.location.hash.replace('#', '');
 			if (initialHash && ['dashboard', 'employees', 'branches', 'reports', 'wifi-settings', 'audit'].includes(initialHash)) {
 				this.state.route = initialHash;
@@ -83,12 +85,11 @@
 			viewport.innerHTML = `
 				<button class="vs-mobile-toggle" id="vs-mobile-menu-btn">☰ Menu</button>
 				${sidebarHtml}
-				<div class="vs-main-content">${mainHtml}</div>
+				<div class="vs-main-content" dir="ltr">${mainHtml}</div>
 			`;
 
 			this.bindAppEvents();
 
-			// Route data prefetching
 			if (this.state.route === 'dashboard' && !this.state.dashboardData) {
 				this.fetchDashboard();
 			} else if (this.state.route === 'employees' && this.state.employees.length === 0) {
@@ -115,7 +116,7 @@
 			const isAdmin = (role === 'vs_system_admin' || role === 'vs_general_manager');
 
 			return `
-				<div class="vs-sidebar" id="vs-app-sidebar">
+				<div class="vs-sidebar" id="vs-app-sidebar" dir="ltr">
 					<div>
 						<div class="vs-sidebar-brand">
 							<div class="vs-sidebar-logo">VS</div>
@@ -172,7 +173,7 @@
 
 		templateLogin: function () {
 			return `
-				<div class="vs-container" style="max-width: 420px; padding-top: 80px;">
+				<div class="vs-container" style="max-width: 420px; padding-top: 80px;" dir="ltr">
 					<div class="vs-card" style="text-align: center;">
 						<div class="vs-sidebar-logo" style="margin: 0 auto 16px auto; width: 48px; height: 48px; font-size: 20px;">VS</div>
 						<h2 style="margin: 0 0 6px 0; font-size: 20px;">Employee Sign In</h2>
@@ -210,18 +211,20 @@
 			const emp = data.employee || {};
 			const att = data.attendance || {};
 			const session = att.session || {};
+			const role = this.state.user ? this.state.user.role : '';
+			const isManager = (role === 'vs_system_admin' || role === 'vs_general_manager' || role === 'vs_branch_manager');
 
 			let actionButton = '';
 			if (att.can_check_in) {
-				actionButton = '<button id="vs-check-in-btn" class="vs-btn vs-btn-primary vs-btn-block" style="padding: 16px; font-size: 16px;">Check In Now</button>';
+				actionButton = '<button id="vs-check-in-btn" class="vs-btn vs-btn-primary vs-btn-block" style="padding: 14px; font-size: 15px;">Check In Now</button>';
 			} else if (att.can_check_out) {
-				actionButton = '<button id="vs-check-out-btn" class="vs-btn vs-btn-secondary vs-btn-block" style="padding: 16px; font-size: 16px;">Check Out Now</button>';
+				actionButton = '<button id="vs-check-out-btn" class="vs-btn vs-btn-secondary vs-btn-block" style="padding: 14px; font-size: 15px;">Check Out Now</button>';
 			} else {
 				actionButton = '<div class="vs-alert vs-alert-success" style="text-align: center; justify-content: center;">Today\'s Attendance Session Completed</div>';
 			}
 
 			return `
-				<div class="vs-grid">
+				<div class="vs-grid" dir="ltr">
 					<div class="vs-action-card">
 						<span class="vs-badge vs-badge-${att.state ? att.state.toLowerCase() : 'none'}">${att.state ? att.state.replace('_', ' ') : 'STANDBY'}</span>
 						<div class="vs-time-display" id="vs-live-clock">--:--:--</div>
@@ -229,7 +232,16 @@
 
 						<div id="vs-attendance-alert" style="width: 100%;"></div>
 
-						<div style="width: 100%; margin-top: 12px;">
+						${isManager ? `
+							<div class="vs-form-group" style="width: 100%; margin-bottom: 12px; text-align: left;">
+								<label style="font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+									<input type="checkbox" id="vs-override-checkbox" />
+									Manager Exception Override (Bypass Wi-Fi check)
+								</label>
+							</div>
+						` : ''}
+
+						<div style="width: 100%; margin-top: 8px;">
 							${actionButton}
 						</div>
 					</div>
@@ -250,7 +262,7 @@
 					</div>
 				</div>
 
-				<div class="vs-card">
+				<div class="vs-card" dir="ltr">
 					<div class="vs-card-header">
 						<h3 class="vs-card-title">Recent Personal Attendance History</h3>
 					</div>
@@ -284,14 +296,28 @@
 
 		templateEmployees: function () {
 			return `
-				<div class="vs-card">
+				<div class="vs-card" dir="ltr">
 					<div class="vs-card-header">
-						<h3 class="vs-card-title">Employee Management</h3>
+						<h3 class="vs-card-title">Employee & Account Management</h3>
 						<div style="display: flex; gap: 8px;">
 							<button id="vs-add-emp-btn" class="vs-btn vs-btn-primary">+ Create Account</button>
 							<button id="vs-export-emp-btn" class="vs-btn vs-btn-secondary">Export CSV</button>
 						</div>
 					</div>
+
+					<div class="vs-grid" style="grid-template-columns: 2fr 1fr; margin-bottom: 16px;">
+						<div class="vs-form-group" style="margin: 0;">
+							<input type="text" id="vs-emp-search-input" class="vs-input" placeholder="Search by name, ID, or phone number..." value="${this.state.empSearch || ''}" />
+						</div>
+						<div class="vs-form-group" style="margin: 0;">
+							<select id="vs-emp-role-filter" class="vs-select">
+								<option value="">All Roles</option>
+								<option value="vs_employee" ${this.state.empRoleFilter === 'vs_employee' ? 'selected' : ''}>Employee</option>
+								<option value="vs_branch_manager" ${this.state.empRoleFilter === 'vs_branch_manager' ? 'selected' : ''}>Branch Manager</option>
+							</select>
+						</div>
+					</div>
+
 					<div id="vs-emp-alert"></div>
 					<div class="vs-table-wrapper">
 						<table class="vs-table">
@@ -319,7 +345,7 @@
 											<button class="vs-btn vs-btn-secondary vs-reset-pass-btn" data-id="${emp.id}" style="padding: 4px 8px; font-size: 11px;">Reset Password</button>
 										</td>
 									</tr>
-								`).join('') || '<tr><td colspan="7" style="text-align:center;">No accounts found.</td></tr>'}
+								`).join('') || '<tr><td colspan="7" style="text-align:center;">No accounts found matching criteria.</td></tr>'}
 							</tbody>
 						</table>
 					</div>
@@ -331,7 +357,7 @@
 
 		templateBranches: function () {
 			return `
-				<div class="vs-card">
+				<div class="vs-card" dir="ltr">
 					<div class="vs-card-header">
 						<h3 class="vs-card-title">Branch Management</h3>
 						<button id="vs-add-branch-btn" class="vs-btn vs-btn-primary">+ Add Branch</button>
@@ -362,13 +388,15 @@
 						</table>
 					</div>
 				</div>
+
+				<div id="vs-branch-modal-container"></div>
 			`;
 		},
 
 		templateWifiSettings: function () {
 			const cfg = this.state.wifiConfig || {};
 			return `
-				<div class="vs-card">
+				<div class="vs-card" dir="ltr">
 					<div class="vs-card-header">
 						<h3 class="vs-card-title">Branch Wi-Fi Settings & Integration Diagnostics</h3>
 					</div>
@@ -424,7 +452,7 @@
 							<input type="password" id="vs-wifi-key" class="vs-input" value="${cfg.api_key || ''}" placeholder="••••••••" />
 						</div>
 
-						<div style="display: flex; gap: 12px; margin-top: 20px;">
+						<div style="display: flex; gap: 12px; margin-top: 16px;">
 							<button type="submit" class="vs-btn vs-btn-primary">Save Wi-Fi Configuration</button>
 							<button type="button" id="vs-test-wifi-btn" class="vs-btn vs-btn-secondary">Test Controller Connection</button>
 						</div>
@@ -438,24 +466,24 @@
 			const m = data.metrics || {};
 
 			return `
-				<div class="vs-card">
+				<div class="vs-card" dir="ltr">
 					<div class="vs-card-header">
 						<h3 class="vs-card-title">Attendance Reports & Analytics</h3>
 						<button id="vs-export-report-btn" class="vs-btn vs-btn-secondary">Export Report CSV</button>
 					</div>
 
-					<div class="vs-grid" style="margin-bottom: 20px;">
-						<div class="vs-card" style="padding: 16px; margin: 0;">
+					<div class="vs-grid" style="margin-bottom: 16px;">
+						<div class="vs-card" style="padding: 14px; margin: 0;">
 							<div style="font-size: 11px; text-transform: uppercase; color: var(--vs-muted);">Total Sessions</div>
-							<div style="font-size: 24px; font-weight: 700; color: var(--vs-primary);">${m.total_sessions || 0}</div>
+							<div style="font-size: 22px; font-weight: 700; color: var(--vs-primary);">${m.total_sessions || 0}</div>
 						</div>
-						<div class="vs-card" style="padding: 16px; margin: 0;">
+						<div class="vs-card" style="padding: 14px; margin: 0;">
 							<div style="font-size: 11px; text-transform: uppercase; color: var(--vs-muted);">Late Arrivals</div>
-							<div style="font-size: 24px; font-weight: 700; color: var(--vs-primary);">${m.total_late || 0}</div>
+							<div style="font-size: 22px; font-weight: 700; color: var(--vs-primary);">${m.total_late || 0}</div>
 						</div>
-						<div class="vs-card" style="padding: 16px; margin: 0;">
+						<div class="vs-card" style="padding: 14px; margin: 0;">
 							<div style="font-size: 11px; text-transform: uppercase; color: var(--vs-muted);">Total Worked Hours</div>
-							<div style="font-size: 24px; font-weight: 700; color: var(--vs-primary);">${m.total_worked_hours || 0}h</div>
+							<div style="font-size: 22px; font-weight: 700; color: var(--vs-primary);">${m.total_worked_hours || 0}h</div>
 						</div>
 					</div>
 
@@ -493,10 +521,15 @@
 
 		templateAuditLogs: function () {
 			return `
-				<div class="vs-card">
+				<div class="vs-card" dir="ltr">
 					<div class="vs-card-header">
 						<h3 class="vs-card-title">Security & Operational Audit Trail</h3>
 					</div>
+
+					<div class="vs-form-group" style="margin-bottom: 16px;">
+						<input type="text" id="vs-audit-search-input" class="vs-input" placeholder="Search audit trail by actor, action, or IP address..." value="${this.state.auditSearch || ''}" />
+					</div>
+
 					<div class="vs-table-wrapper">
 						<table class="vs-table">
 							<thead>
@@ -551,14 +584,12 @@
 		},
 
 		bindAppEvents: function () {
-			// Mobile Drawer Menu toggle
 			const mobileBtn = document.getElementById('vs-mobile-menu-btn');
 			const sidebar = document.getElementById('vs-app-sidebar');
 			if (mobileBtn && sidebar) {
 				mobileBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
 			}
 
-			// Sidebar menu buttons
 			document.querySelectorAll('.vs-menu-item').forEach(btn => {
 				btn.addEventListener('click', (e) => {
 					const target = e.currentTarget.getAttribute('data-route');
@@ -568,7 +599,6 @@
 				});
 			});
 
-			// Logout button
 			const logoutBtn = document.getElementById('vs-logout-btn');
 			if (logoutBtn) {
 				logoutBtn.addEventListener('click', () => {
@@ -582,7 +612,6 @@
 				});
 			}
 
-			// Attendance Check-In / Check-Out
 			const checkInBtn = document.getElementById('vs-check-in-btn');
 			if (checkInBtn) {
 				checkInBtn.addEventListener('click', () => this.runAttendanceSequence('check-in'));
@@ -593,13 +622,40 @@
 				checkOutBtn.addEventListener('click', () => this.runAttendanceSequence('check-out'));
 			}
 
-			// Add Employee Modal
 			const addEmpBtn = document.getElementById('vs-add-emp-btn');
 			if (addEmpBtn) {
 				addEmpBtn.addEventListener('click', () => this.openAddEmployeeModal());
 			}
 
-			// Reset Password Buttons
+			const empSearchInput = document.getElementById('vs-emp-search-input');
+			if (empSearchInput) {
+				empSearchInput.addEventListener('input', (e) => {
+					this.state.empSearch = e.target.value;
+					this.fetchEmployees();
+				});
+			}
+
+			const empRoleFilter = document.getElementById('vs-emp-role-filter');
+			if (empRoleFilter) {
+				empRoleFilter.addEventListener('change', (e) => {
+					this.state.empRoleFilter = e.target.value;
+					this.fetchEmployees();
+				});
+			}
+
+			const auditSearchInput = document.getElementById('vs-audit-search-input');
+			if (auditSearchInput) {
+				auditSearchInput.addEventListener('input', (e) => {
+					this.state.auditSearch = e.target.value;
+					this.fetchAuditLogs();
+				});
+			}
+
+			const addBranchBtn = document.getElementById('vs-add-branch-btn');
+			if (addBranchBtn) {
+				addBranchBtn.addEventListener('click', () => this.openAddBranchModal());
+			}
+
 			document.querySelectorAll('.vs-reset-pass-btn').forEach(btn => {
 				btn.addEventListener('click', (e) => {
 					const empId = e.currentTarget.getAttribute('data-id');
@@ -613,7 +669,6 @@
 				});
 			});
 
-			// Wi-Fi Config Form & Test
 			const wifiBranchSelect = document.getElementById('vs-wifi-branch-select');
 			if (wifiBranchSelect) {
 				wifiBranchSelect.addEventListener('change', (e) => {
@@ -659,12 +714,20 @@
 		},
 
 		runAttendanceSequence: function (action) {
+			const overrideBox = document.getElementById('vs-override-checkbox');
+			const exceptionOverride = overrideBox && overrideBox.checked;
+
+			const urlParams = new URLSearchParams(window.location.search);
+			const tokenParam = urlParams.get('token') || '';
+			const ssidParam = urlParams.get('ssid') || 'Workplace_WiFi';
+			const bssidParam = urlParams.get('bssid') || '';
+
 			const overlay = document.createElement('div');
 			overlay.className = 'vs-progress-overlay';
 			overlay.innerHTML = `
-				<div class="vs-progress-box">
-					<h3 style="margin: 0 0 8px 0; font-size: 18px;">Attendance Verification</h3>
-					<p style="color: var(--vs-muted); font-size: 13px; margin: 0;">Please stay on this screen while we verify your workplace connectivity.</p>
+				<div class="vs-progress-box" dir="ltr">
+					<h3 style="margin: 0 0 8px 0; font-size: 16px;">Attendance Verification</h3>
+					<p style="color: var(--vs-muted); font-size: 12px; margin: 0;">Please stay on this screen while we verify your workplace connectivity.</p>
 
 					<div class="vs-progress-steps">
 						<div class="vs-step-item active" id="vs-step-1"><div class="vs-step-icon"></div> Checking Employee Account...</div>
@@ -684,17 +747,20 @@
 				}
 			};
 
-			setTimeout(() => { setStep(1, 'completed'); setStep(2, 'active'); }, 500);
-			setTimeout(() => { setStep(2, 'completed'); setStep(3, 'active'); }, 1000);
-			setTimeout(() => { setStep(3, 'completed'); setStep(4, 'active'); }, 1500);
+			setTimeout(() => { setStep(1, 'completed'); setStep(2, 'active'); }, 400);
+			setTimeout(() => { setStep(2, 'completed'); setStep(3, 'active'); }, 800);
+			setTimeout(() => { setStep(3, 'completed'); setStep(4, 'active'); }, 1200);
 
 			setTimeout(() => {
 				setStep(4, 'completed');
 				setStep(5, 'active');
 
 				const payload = {
-					ssid: 'Workplace_WiFi',
-					timestamp: Math.floor(Date.now() / 1000)
+					ssid: ssidParam,
+					bssid: bssidParam,
+					token: tokenParam,
+					timestamp: Math.floor(Date.now() / 1000),
+					exception_override: exceptionOverride
 				};
 
 				this.request('/attendance/' + action, 'POST', payload)
@@ -711,7 +777,7 @@
 						document.body.removeChild(overlay);
 						this.showAlert('vs-attendance-alert', err.message || 'Verification request failed.', 'error');
 					});
-			}, 2000);
+			}, 1600);
 		},
 
 		openAddEmployeeModal: function () {
@@ -719,9 +785,9 @@
 			if (!container) return;
 
 			container.innerHTML = `
-				<div class="vs-progress-overlay">
-					<div class="vs-progress-box" style="text-align: left; max-width: 500px;">
-						<h3 style="margin: 0 0 16px 0; font-size: 18px;">Create Employee Account</h3>
+				<div class="vs-progress-overlay" dir="ltr">
+					<div class="vs-progress-box" style="text-align: left; max-width: 480px;">
+						<h3 style="margin: 0 0 14px 0; font-size: 16px;">Create Employee Account</h3>
 						<form id="vs-create-emp-form">
 							<div class="vs-form-group">
 								<label class="vs-label">Full Name</label>
@@ -751,7 +817,7 @@
 									<option value="vs_branch_manager">Branch Manager</option>
 								</select>
 							</div>
-							<div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px;">
+							<div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px;">
 								<button type="button" class="vs-btn vs-btn-secondary" id="vs-close-modal">Cancel</button>
 								<button type="submit" class="vs-btn vs-btn-primary">Create Account</button>
 							</div>
@@ -783,6 +849,62 @@
 			});
 		},
 
+		openAddBranchModal: function () {
+			const container = document.getElementById('vs-branch-modal-container');
+			if (!container) return;
+
+			container.innerHTML = `
+				<div class="vs-progress-overlay" dir="ltr">
+					<div class="vs-progress-box" style="text-align: left; max-width: 480px;">
+						<h3 style="margin: 0 0 14px 0; font-size: 16px;">Add New Branch & Network</h3>
+						<form id="vs-create-branch-form">
+							<div class="vs-form-group">
+								<label class="vs-label">Branch Name</label>
+								<input type="text" id="vs-b-name" class="vs-input" placeholder="e.g. Dubai Main Campus" required />
+							</div>
+							<div class="vs-form-group">
+								<label class="vs-label">Branch Code</label>
+								<input type="text" id="vs-b-code" class="vs-input" placeholder="e.g. DXB-01" required />
+							</div>
+							<div class="vs-form-group">
+								<label class="vs-label">Approved Network SSID</label>
+								<input type="text" id="vs-b-ssid" class="vs-input" placeholder="e.g. Workplace_Secure_WiFi" />
+							</div>
+							<div class="vs-form-group">
+								<label class="vs-label">Wi-Fi Shared Secret</label>
+								<input type="password" id="vs-b-secret" class="vs-input" placeholder="••••••••" />
+							</div>
+							<div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px;">
+								<button type="button" class="vs-btn vs-btn-secondary" id="vs-close-b-modal">Cancel</button>
+								<button type="submit" class="vs-btn vs-btn-primary">Save Branch</button>
+							</div>
+						</form>
+					</div>
+				</div>
+			`;
+
+			document.getElementById('vs-close-b-modal').addEventListener('click', () => { container.innerHTML = ''; });
+			document.getElementById('vs-create-branch-form').addEventListener('submit', (e) => {
+				e.preventDefault();
+				const payload = {
+					name: document.getElementById('vs-b-name').value,
+					branch_code: document.getElementById('vs-b-code').value,
+					wifi_ssid: document.getElementById('vs-b-ssid').value,
+					wifi_secret: document.getElementById('vs-b-secret').value
+				};
+
+				this.request('/branches', 'POST', payload)
+					.then(res => {
+						container.innerHTML = '';
+						if (res.success) {
+							this.fetchBranches();
+						} else {
+							alert(res.message);
+						}
+					});
+			});
+		},
+
 		startLiveClock: function () {
 			const clock = document.getElementById('vs-live-clock');
 			if (!clock) return;
@@ -804,7 +926,11 @@
 		},
 
 		fetchEmployees: function () {
-			return this.request('/employees', 'GET').then(res => {
+			let endpoint = '/employees?';
+			if (this.state.empSearch) endpoint += `search=${encodeURIComponent(this.state.empSearch)}&`;
+			if (this.state.empRoleFilter) endpoint += `role=${encodeURIComponent(this.state.empRoleFilter)}&`;
+
+			return this.request(endpoint, 'GET').then(res => {
 				if (res.success) {
 					this.state.employees = res.employees;
 					this.render();
@@ -840,7 +966,10 @@
 		},
 
 		fetchAuditLogs: function () {
-			return this.request('/audit-logs', 'GET').then(res => {
+			let endpoint = '/audit-logs?';
+			if (this.state.auditSearch) endpoint += `search=${encodeURIComponent(this.state.auditSearch)}&`;
+
+			return this.request(endpoint, 'GET').then(res => {
 				if (res.success) {
 					this.state.auditLogs = res.logs;
 					this.render();
