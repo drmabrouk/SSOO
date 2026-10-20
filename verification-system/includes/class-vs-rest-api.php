@@ -159,6 +159,12 @@ class VS_Rest_API {
 			)
 		) );
 
+		register_rest_route( self::NAMESPACE, '/wifi/discover', array(
+			'methods'             => 'POST',
+			'callback'            => array( __CLASS__, 'discover_wifi_networks' ),
+			'permission_callback' => array( __CLASS__, 'check_manager_permission' ),
+		) );
+
 		register_rest_route( self::NAMESPACE, '/wifi/test', array(
 			'methods'             => 'POST',
 			'callback'            => array( __CLASS__, 'test_wifi_connection' ),
@@ -290,6 +296,8 @@ class VS_Rest_API {
 			'bssid'     => sanitize_text_field( $request->get_param( 'bssid' ) ),
 			'token'     => sanitize_text_field( $request->get_param( 'token' ) ),
 			'timestamp' => absint( $request->get_param( 'timestamp' ) ),
+			'latitude'  => $request->get_param( 'latitude' ) !== null ? (float) $request->get_param( 'latitude' ) : null,
+			'longitude' => $request->get_param( 'longitude' ) !== null ? (float) $request->get_param( 'longitude' ) : null,
 			'client_ip' => isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( $_SERVER['REMOTE_ADDR'] ) : '',
 		);
 
@@ -315,6 +323,8 @@ class VS_Rest_API {
 			'bssid'     => sanitize_text_field( $request->get_param( 'bssid' ) ),
 			'token'     => sanitize_text_field( $request->get_param( 'token' ) ),
 			'timestamp' => absint( $request->get_param( 'timestamp' ) ),
+			'latitude'  => $request->get_param( 'latitude' ) !== null ? (float) $request->get_param( 'latitude' ) : null,
+			'longitude' => $request->get_param( 'longitude' ) !== null ? (float) $request->get_param( 'longitude' ) : null,
 			'client_ip' => isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( $_SERVER['REMOTE_ADDR'] ) : '',
 		);
 
@@ -335,11 +345,17 @@ class VS_Rest_API {
 			'role'      => sanitize_text_field( $request->get_param( 'role' ) ),
 			'branch_id' => absint( $request->get_param( 'branch_id' ) ),
 			'status'    => sanitize_text_field( $request->get_param( 'status' ) ),
+			'page'      => absint( $request->get_param( 'page' ) ? $request->get_param( 'page' ) : 1 ),
+			'per_page'  => absint( $request->get_param( 'per_page' ) ? $request->get_param( 'per_page' ) : 20 ),
 		);
 
-		$employees = VS_Employee::search_employees( $args );
+		$result = VS_Employee::search_employees( $args );
 
-		return new WP_REST_Response( array( 'success' => true, 'employees' => $employees ), 200 );
+		return new WP_REST_Response( array(
+			'success'    => true,
+			'employees'  => $result['employees'],
+			'pagination' => $result['pagination'],
+		), 200 );
 	}
 
 	public static function create_employee( WP_REST_Request $request ) {
@@ -464,7 +480,6 @@ class VS_Rest_API {
 		);
 
 		if ( $config ) {
-			// Redact sensitive secrets in REST responses
 			$config->shared_secret = ! empty( $config->shared_secret ) ? '••••••••' : '';
 			$config->api_key       = ! empty( $config->api_key ) ? '••••••••' : '';
 		}
@@ -520,6 +535,18 @@ class VS_Rest_API {
 		return new WP_REST_Response( array( 'success' => true, 'message' => __( 'Wi-Fi configuration saved successfully.', 'verification-system' ) ), 200 );
 	}
 
+	public static function discover_wifi_networks( WP_REST_Request $request ) {
+		$params    = $request->get_json_params();
+		$branch_id = absint( $params['branch_id'] );
+
+		if ( ! VS_Branch::can_manage_branch( $branch_id ) ) {
+			return new WP_REST_Response( array( 'success' => false, 'message' => __( 'Permission denied to discover networks for this branch.', 'verification-system' ) ), 403 );
+		}
+
+		$res = VS_WiFi::discover_networks( $branch_id );
+		return new WP_REST_Response( $res, 200 );
+	}
+
 	public static function test_wifi_connection( WP_REST_Request $request ) {
 		$params    = $request->get_json_params();
 		$branch_id = absint( $params['branch_id'] );
@@ -539,10 +566,15 @@ class VS_Rest_API {
 			'search'     => sanitize_text_field( $request->get_param( 'search' ) ),
 			'start_date' => sanitize_text_field( $request->get_param( 'start_date' ) ),
 			'end_date'   => sanitize_text_field( $request->get_param( 'end_date' ) ),
-			'limit'      => absint( $request->get_param( 'limit' ) ? $request->get_param( 'limit' ) : 50 ),
+			'page'       => absint( $request->get_param( 'page' ) ? $request->get_param( 'page' ) : 1 ),
+			'per_page'   => absint( $request->get_param( 'per_page' ) ? $request->get_param( 'per_page' ) : 50 ),
 		);
 
-		$logs = VS_Audit::get_logs( $args );
-		return new WP_REST_Response( array( 'success' => true, 'logs' => $logs ), 200 );
+		$result = VS_Audit::get_logs( $args );
+		return new WP_REST_Response( array(
+			'success'    => true,
+			'logs'       => $result['logs'],
+			'pagination' => $result['pagination'],
+		), 200 );
 	}
 }

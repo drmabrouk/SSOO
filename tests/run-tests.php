@@ -108,6 +108,9 @@ function sanitize_textarea_field( $str ) { return trim( $str ); }
 function wp_json_encode( $data ) { return json_encode( $data ); }
 function absint( $val ) { return abs( (int) $val ); }
 function user_can( $user, $cap ) { return false; }
+function get_transient( $transient ) { return false; }
+function set_transient( $transient, $value, $expiration = 0 ) { return true; }
+function delete_transient( $transient ) { return true; }
 
 class VS_Test_Runner {
 
@@ -124,6 +127,7 @@ class VS_Test_Runner {
 		$this->test_audit_sanitization();
 		$this->test_wifi_diagnostics();
 		$this->test_role_sanitization();
+		$this->test_haversine_distance();
 
 		echo "\n=============================================\n";
 		echo "Total Passed: {$this->passed}\n";
@@ -229,6 +233,13 @@ class VS_Test_Runner {
 		echo "\n--- Testing Privilege Escalation Prevention ---\n";
 		$role = VS_Employee::sanitize_app_role( 'administrator' );
 		$this->assert( $role === 'vs_employee', 'Non-system admin cannot escalate privileges to administrator' );
+	}
+
+	private function test_haversine_distance() {
+		echo "\n--- Testing Location Geofence Haversine Calculations ---\n";
+		// Distance between Dubai Frame (25.2355, 55.3003) and Burj Khalifa (25.1972, 55.2744) ~ 5.0km
+		$dist = VS_WiFi::calculate_haversine_distance_meters( 25.2355, 55.3003, 25.1972, 55.2744 );
+		$this->assert( $dist > 4500 && $dist < 5500, 'Haversine distance accurately measures meters between coordinates' );
 	}
 }
 

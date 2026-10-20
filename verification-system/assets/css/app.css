@@ -45,6 +45,19 @@
 /* Visibility */
 .hidden { display: none !important; }
 
+/* Skeleton Loader Component */
+.vs-skeleton {
+	background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+	background-size: 200% 100%;
+	animation: vs-skeleton-wave 1.5s infinite;
+	border-radius: 6px;
+}
+
+@keyframes vs-skeleton-wave {
+	0% { background-position: 200% 0; }
+	100% { background-position: -200% 0; }
+}
+
 /* Loader Screen */
 .vs-loader-screen {
 	display: flex;
@@ -393,6 +406,23 @@
 	background: #f7f7f7;
 	color: #111111;
 	border-color: #111111;
+}
+
+/* Pagination Bar Controls */
+.vs-pagination-bar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding-top: 14px;
+	margin-top: 14px;
+	border-top: 1px solid var(--vs-border);
+	font-size: 12px;
+	color: var(--vs-muted);
+}
+
+.vs-pagination-controls {
+	display: flex;
+	gap: 6px;
 }
 
 /* Forms & Inputs */

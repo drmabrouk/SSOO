@@ -17,6 +17,16 @@ class VS_Auth {
 	const DEFAULT_COUNTRY_CODE = '+971';
 
 	/**
+	 * Maximum failed password attempts before temporary lockout.
+	 */
+	const MAX_FAILED_LOGIN_ATTEMPTS = 5;
+
+	/**
+	 * Lockout window in seconds (15 minutes).
+	 */
+	const LOCKOUT_WINDOW_SECONDS = 900;
+
+	/**
 	 * Normalize mobile phone number to canonical international format (+971XXXXXXXXX).
 	 *
 	 * @param string $phone Raw phone input.
@@ -27,8 +37,7 @@ class VS_Auth {
 			return false;
 		}
 
-		// Remove all non-digit characters except leading plus
-		$phone = trim( $phone );
+		$phone    = trim( $phone );
 		$has_plus = ( 0 === strpos( $phone, '+' ) );
 		$digits   = preg_replace( '/\D/', '', $phone );
 
@@ -36,7 +45,6 @@ class VS_Auth {
 			return false;
 		}
 
-		// Handle standard UAE local numbers starting with '05' or '5'
 		if ( ! $has_plus ) {
 			if ( 0 === strpos( $digits, '971' ) && strlen( $digits ) === 12 ) {
 				return '+' . $digits;
@@ -48,17 +56,14 @@ class VS_Auth {
 				return '+971' . $digits;
 			}
 		} else {
-			// Had '+'
 			if ( 0 === strpos( $digits, '971' ) && strlen( $digits ) === 12 ) {
 				return '+' . $digits;
 			}
-			// General international format check
 			if ( strlen( $digits ) >= 8 && strlen( $digits ) <= 15 ) {
 				return '+' . $digits;
 			}
 		}
 
-		// Fallback for UAE numbers if 9 digits provided
 		if ( strlen( $digits ) === 9 && 0 === strpos( $digits, '5' ) ) {
 			return '+971' . $digits;
 		}
@@ -81,8 +86,7 @@ class VS_Auth {
 		}
 
 		$table = $wpdb->prefix . 'vs_employees';
-		// Search both normalized and raw digits
-		$row = $wpdb->get_row(
+		$row   = $wpdb->get_row(
 			$wpdb->prepare(
 				"SELECT * FROM {$table} WHERE phone_number = %s OR phone_number = %s LIMIT 1",
 				$normalized,
@@ -94,7 +98,45 @@ class VS_Auth {
 	}
 
 	/**
-	 * Authenticate user by phone number and password.
+	 * Check if IP address or phone number is currently rate-limited due to excessive failed attempts.
+	 *
+	 * @param string $phone Normalized phone.
+	 * @return bool
+	 */
+	public static function is_login_rate_limited( $phone ) {
+		$ip          = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( $_SERVER['REMOTE_ADDR'] ) : '127.0.0.1';
+		$transient_key = 'vs_failed_logins_' . md5( $ip . '|' . $phone );
+		$attempts    = get_transient( $transient_key );
+
+		return ( $attempts && (int) $attempts >= self::MAX_FAILED_LOGIN_ATTEMPTS );
+	}
+
+	/**
+	 * Record a failed login attempt for rate-limiting.
+	 *
+	 * @param string $phone Normalized phone.
+	 */
+	private static function record_failed_login( $phone ) {
+		$ip            = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( $_SERVER['REMOTE_ADDR'] ) : '127.0.0.1';
+		$transient_key = 'vs_failed_logins_' . md5( $ip . '|' . $phone );
+		$attempts      = (int) get_transient( $transient_key );
+
+		set_transient( $transient_key, $attempts + 1, self::LOCKOUT_WINDOW_SECONDS );
+	}
+
+	/**
+	 * Reset failed login counters after successful authentication.
+	 *
+	 * @param string $phone Normalized phone.
+	 */
+	private static function clear_failed_logins( $phone ) {
+		$ip            = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( $_SERVER['REMOTE_ADDR'] ) : '127.0.0.1';
+		$transient_key = 'vs_failed_logins_' . md5( $ip . '|' . $phone );
+		delete_transient( $transient_key );
+	}
+
+	/**
+	 * Authenticate user by phone number and password with brute force rate limiting.
 	 *
 	 * @param string $phone Raw phone input.
 	 * @param string $password Password.
@@ -110,8 +152,13 @@ class VS_Auth {
 			return new WP_Error( 'invalid_phone', __( 'Invalid UAE phone number format.', 'verification-system' ) );
 		}
 
+		if ( self::is_login_rate_limited( $normalized ) ) {
+			return new WP_Error( 'rate_limited', __( 'Too many failed sign in attempts. Please wait 15 minutes before trying again.', 'verification-system' ) );
+		}
+
 		$employee = self::get_employee_by_phone( $normalized );
 		if ( ! $employee ) {
+			self::record_failed_login( $normalized );
 			return new WP_Error( 'account_not_found', __( 'No account found with this mobile number.', 'verification-system' ) );
 		}
 
@@ -126,6 +173,8 @@ class VS_Auth {
 
 		// Check password
 		if ( ! wp_check_password( $password, $user->user_pass, $user->ID ) ) {
+			self::record_failed_login( $normalized );
+
 			VS_Audit::log_event(
 				$user->ID,
 				$user->display_name,
@@ -138,6 +187,9 @@ class VS_Auth {
 			);
 			return new WP_Error( 'invalid_password', __( 'Incorrect password.', 'verification-system' ) );
 		}
+
+		// Clear failed attempt counter on success
+		self::clear_failed_logins( $normalized );
 
 		// Set authentication session
 		wp_set_current_user( $user->ID );

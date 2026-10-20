@@ -146,7 +146,85 @@ class VS_WiFi_Meraki_Adapter implements VS_WiFi_Adapter_Interface {
 class VS_WiFi {
 
 	/**
-	 * Perform Wi-Fi verification fail-closed against the employee's assigned branch network.
+	 * Calculate distance between two coordinate pairs in meters using Haversine formula.
+	 *
+	 * @param float $lat1 Lat 1.
+	 * @param float $lon1 Lon 1.
+	 * @param float $lat2 Lat 2.
+	 * @param float $lon2 Lon 2.
+	 * @return float Distance in meters.
+	 */
+	public static function calculate_haversine_distance_meters( $lat1, $lon1, $lat2, $lon2 ) {
+		$earth_radius = 6371000; // meters
+
+		$dLat = deg2rad( $lat2 - $lat1 );
+		$dLon = deg2rad( $lon2 - $lon1 );
+
+		$a = sin( $dLat / 2 ) * sin( $dLat / 2 ) +
+			cos( deg2rad( $lat1 ) ) * cos( deg2rad( $lat2 ) ) *
+			sin( $dLon / 2 ) * sin( $dLon / 2 );
+
+		$c = 2 * atan2( sqrt( $a ), sqrt( 1 - $a ) );
+
+		return $earth_radius * $c;
+	}
+
+	/**
+	 * Discover network SSIDs and BSSIDs from supported provider API.
+	 *
+	 * @param int $branch_id Branch ID.
+	 * @return array Discovered networks metadata.
+	 */
+	public static function discover_networks( $branch_id ) {
+		global $wpdb;
+
+		$config_table = $wpdb->prefix . 'vs_wifi_configs';
+		$wifi_config  = $wpdb->get_row(
+			$wpdb->prepare( "SELECT * FROM {$config_table} WHERE branch_id = %d LIMIT 1", $branch_id )
+		);
+
+		if ( ! $wifi_config ) {
+			return array(
+				'success'  => false,
+				'message'  => __( 'No Wi-Fi configuration found for this branch. Please save initial settings first.', 'verification-system' ),
+				'networks' => array(),
+			);
+		}
+
+		if ( 'meraki' === $wifi_config->auth_type && ! empty( $wifi_config->api_endpoint ) && ! empty( $wifi_config->api_key ) ) {
+			$response = wp_remote_get( rtrim( $wifi_config->api_endpoint, '/' ) . '/ssids', array(
+				'headers' => array( 'X-Cisco-Meraki-API-Key' => $wifi_config->api_key ),
+				'timeout' => 5,
+			) );
+
+			if ( ! is_wp_error( $response ) && wp_remote_retrieve_response_code( $response ) === 200 ) {
+				$ssids = json_decode( wp_remote_retrieve_body( $response ), true );
+				return array(
+					'success'  => true,
+					'message'  => __( 'Retrieved network SSIDs from Cisco Meraki Controller.', 'verification-system' ),
+					'networks' => is_array( $ssids ) ? $ssids : array(),
+				);
+			}
+		}
+
+		// Fallback for HMAC token or manual configuration
+		$bssids_array = ! empty( $wifi_config->allowed_bssids ) ? array_filter( array_map( 'trim', explode( "\n", $wifi_config->allowed_bssids ) ) ) : array();
+
+		return array(
+			'success'  => true,
+			'message'  => __( 'Imported configured network settings from branch database.', 'verification-system' ),
+			'networks' => array(
+				array(
+					'ssid'    => $wifi_config->ssid,
+					'bssids'  => $bssids_array,
+					'status'  => 'configured',
+				)
+			),
+		);
+	}
+
+	/**
+	 * Perform Wi-Fi and location verification fail-closed against the employee's assigned branch network.
 	 *
 	 * @param object $employee Employee object.
 	 * @param array  $payload Verification parameters from client request.
@@ -168,7 +246,25 @@ class VS_WiFi {
 			}
 		}
 
-		// 2. Fetch Wi-Fi configuration mapped to employee's assigned branch
+		// 2. Location Geofence Verification if coordinates supplied
+		if ( isset( $payload['latitude'] ) && isset( $payload['longitude'] ) ) {
+			$branch = VS_Branch::get_branch( $employee->branch_id );
+			if ( $branch && ! empty( $branch->latitude ) && ! empty( $branch->longitude ) ) {
+				$dist   = self::calculate_haversine_distance_meters( $payload['latitude'], $payload['longitude'], $branch->latitude, $branch->longitude );
+				$radius = ! empty( $branch->geofence_radius_meters ) ? (float) $branch->geofence_radius_meters : 200;
+
+				if ( $dist > $radius ) {
+					self::log_verification( $employee->id, $employee->branch_id, '', 'FAILED', sprintf( 'Location geofence check failed: %d meters away from branch (Max allowed: %d meters).', round( $dist ), round( $radius ) ), $payload );
+					return array(
+						'success' => false,
+						'code'    => 'location_out_of_range',
+						'message' => sprintf( __( 'Location verification failed: You are %d meters away from your assigned workplace branch (Maximum allowed: %d meters).', 'verification-system' ), round( $dist ), round( $radius ) ),
+					);
+				}
+			}
+		}
+
+		// 3. Fetch Wi-Fi configuration mapped to employee's assigned branch
 		$config_table = $wpdb->prefix . 'vs_wifi_configs';
 		$wifi_config  = $wpdb->get_row(
 			$wpdb->prepare( "SELECT * FROM {$config_table} WHERE branch_id = %d AND is_active = 1 LIMIT 1", $employee->branch_id )
@@ -183,7 +279,7 @@ class VS_WiFi {
 			);
 		}
 
-		// 3. Resolve appropriate Adapter
+		// 4. Resolve appropriate Adapter
 		$adapter = null;
 		switch ( $wifi_config->auth_type ) {
 			case 'meraki':
@@ -197,7 +293,7 @@ class VS_WiFi {
 
 		$result = $adapter->verify( $employee, $payload, $wifi_config );
 
-		// 4. Update last successful verification timestamp on success
+		// 5. Update last successful verification timestamp on success
 		if ( $result['success'] ) {
 			$wpdb->update(
 				$config_table,
@@ -206,7 +302,7 @@ class VS_WiFi {
 			);
 		}
 
-		// 5. Log verification outcome
+		// 6. Log verification outcome
 		self::log_verification(
 			$employee->id,
 			$employee->branch_id,

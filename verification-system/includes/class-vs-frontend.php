@@ -18,6 +18,23 @@ class VS_Frontend {
 		add_shortcode( 'verification_system', array( __CLASS__, 'render_app' ) );
 		add_action( 'wp_enqueue_scripts', array( __CLASS__, 'enqueue_assets' ) );
 		add_filter( 'template_include', array( __CLASS__, 'isolate_app_template' ), 99 );
+		add_action( 'send_headers', array( __CLASS__, 'set_nocache_headers' ) );
+	}
+
+	/**
+	 * Send strict Cache-Control headers on the application page to prevent back-button caching of protected user sessions.
+	 */
+	public static function set_nocache_headers() {
+		if ( is_admin() ) {
+			return;
+		}
+
+		$app_page_id = get_option( 'vs_app_page_id', 0 );
+		$current_id  = get_queried_object_id();
+
+		if ( ( $app_page_id && (int) $current_id === (int) $app_page_id ) || ( is_page() && has_shortcode( get_post_field( 'post_content', $current_id ), 'verification_system' ) ) ) {
+			nocache_headers();
+		}
 	}
 
 	/**
@@ -46,12 +63,16 @@ class VS_Frontend {
 	 * Render clean standalone canvas HTML page for the independent application.
 	 */
 	private static function render_canvas_page() {
+		nocache_headers();
 		?>
 		<!DOCTYPE html>
 		<html <?php language_attributes(); ?> dir="ltr">
 		<head>
 			<meta charset="<?php bloginfo( 'charset' ); ?>">
 			<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+			<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+			<meta http-equiv="Pragma" content="no-cache">
+			<meta http-equiv="Expires" content="0">
 			<title><?php echo esc_html( get_bloginfo( 'name' ) ); ?> – Verification System</title>
 			<link rel="preconnect" href="https://fonts.googleapis.com">
 			<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

@@ -12,10 +12,10 @@ if ( ! defined( 'ABSPATH' ) ) {
 class VS_Employee {
 
 	/**
-	 * Search and list employees with role, branch, and status filters.
+	 * Search and list employees with role, branch, status, and server-side pagination.
 	 *
 	 * @param array $args Query parameters.
-	 * @return array Array of employee records with branch details.
+	 * @return array Array containing results dataset and pagination metadata.
 	 */
 	public static function search_employees( $args = array() ) {
 		global $wpdb;
@@ -47,13 +47,34 @@ class VS_Employee {
 			$where .= $wpdb->prepare( " AND e.status = %s", sanitize_text_field( $args['status'] ) );
 		}
 
+		// Count total records for pagination
+		$count_sql   = "SELECT COUNT(*) FROM {$emp_table} e {$where}";
+		$total_count = (int) $wpdb->get_var( $count_sql );
+
+		// Pagination calculation
+		$per_page = isset( $args['per_page'] ) ? max( 1, min( 100, absint( $args['per_page'] ) ) ) : 20;
+		$page     = isset( $args['page'] ) ? max( 1, absint( $args['page'] ) ) : 1;
+		$offset   = ( $page - 1 ) * $per_page;
+		$pages    = ceil( $total_count / $per_page );
+
 		$query = "SELECT e.*, b.name as branch_name
 			FROM {$emp_table} e
 			LEFT JOIN {$branch_table} b ON e.branch_id = b.id
 			{$where}
-			ORDER BY e.id DESC";
+			ORDER BY e.id DESC
+			LIMIT %d OFFSET %d";
 
-		return $wpdb->get_results( $query );
+		$employees = $wpdb->get_results( $wpdb->prepare( $query, $per_page, $offset ) );
+
+		return array(
+			'employees'  => $employees,
+			'pagination' => array(
+				'total_records' => $total_count,
+				'total_pages'   => max( 1, $pages ),
+				'current_page'  => $page,
+				'per_page'      => $per_page,
+			),
+		);
 	}
 
 	/**

@@ -11,6 +11,8 @@
 			dashboardData: null,
 			branches: [],
 			employees: [],
+			employeePagination: { current_page: 1, total_pages: 1, total_records: 0 },
+			auditPagination: { current_page: 1, total_pages: 1, total_records: 0 },
 			reportsData: null,
 			auditLogs: [],
 			wifiConfig: null,
@@ -18,6 +20,8 @@
 			empSearch: '',
 			empRoleFilter: '',
 			auditSearch: '',
+			searchDebounceTimer: null,
+			userCoords: null,
 		},
 
 		init: function () {
@@ -295,6 +299,7 @@
 		},
 
 		templateEmployees: function () {
+			const pag = this.state.employeePagination || {};
 			return `
 				<div class="vs-card" dir="ltr">
 					<div class="vs-card-header">
@@ -349,6 +354,14 @@
 							</tbody>
 						</table>
 					</div>
+
+					<div class="vs-pagination-bar">
+						<div>Showing Page ${pag.current_page || 1} of ${pag.total_pages || 1} (${pag.total_records || 0} Total Accounts)</div>
+						<div class="vs-pagination-controls">
+							<button id="vs-emp-prev-btn" class="vs-btn vs-btn-secondary" style="padding: 4px 10px; font-size: 12px;" ${pag.current_page <= 1 ? 'disabled' : ''}>Previous</button>
+							<button id="vs-emp-next-btn" class="vs-btn vs-btn-secondary" style="padding: 4px 10px; font-size: 12px;" ${pag.current_page >= pag.total_pages ? 'disabled' : ''}>Next</button>
+						</div>
+					</div>
 				</div>
 
 				<div id="vs-modal-container"></div>
@@ -399,6 +412,7 @@
 				<div class="vs-card" dir="ltr">
 					<div class="vs-card-header">
 						<h3 class="vs-card-title">Branch Wi-Fi Settings & Integration Diagnostics</h3>
+						<button id="vs-discover-wifi-btn" class="vs-btn vs-btn-secondary">Import/Discover Networks</button>
 					</div>
 
 					<div class="vs-form-group">
@@ -520,6 +534,7 @@
 		},
 
 		templateAuditLogs: function () {
+			const pag = this.state.auditPagination || {};
 			return `
 				<div class="vs-card" dir="ltr">
 					<div class="vs-card-header">
@@ -555,6 +570,14 @@
 								`).join('') || '<tr><td colspan="6" style="text-align:center;">No audit records found.</td></tr>'}
 							</tbody>
 						</table>
+					</div>
+
+					<div class="vs-pagination-bar">
+						<div>Showing Page ${pag.current_page || 1} of ${pag.total_pages || 1} (${pag.total_records || 0} Total Log Entries)</div>
+						<div class="vs-pagination-controls">
+							<button id="vs-audit-prev-btn" class="vs-btn vs-btn-secondary" style="padding: 4px 10px; font-size: 12px;" ${pag.current_page <= 1 ? 'disabled' : ''}>Previous</button>
+							<button id="vs-audit-next-btn" class="vs-btn vs-btn-secondary" style="padding: 4px 10px; font-size: 12px;" ${pag.current_page >= pag.total_pages ? 'disabled' : ''}>Next</button>
+						</div>
 					</div>
 				</div>
 			`;
@@ -627,11 +650,14 @@
 				addEmpBtn.addEventListener('click', () => this.openAddEmployeeModal());
 			}
 
+			// Debounced Employee Search
 			const empSearchInput = document.getElementById('vs-emp-search-input');
 			if (empSearchInput) {
 				empSearchInput.addEventListener('input', (e) => {
+					clearTimeout(this.state.searchDebounceTimer);
 					this.state.empSearch = e.target.value;
-					this.fetchEmployees();
+					this.state.employeePagination.current_page = 1;
+					this.state.searchDebounceTimer = setTimeout(() => this.fetchEmployees(), 300);
 				});
 			}
 
@@ -639,15 +665,61 @@
 			if (empRoleFilter) {
 				empRoleFilter.addEventListener('change', (e) => {
 					this.state.empRoleFilter = e.target.value;
+					this.state.employeePagination.current_page = 1;
 					this.fetchEmployees();
 				});
 			}
 
+			// Employee Pagination
+			const empPrevBtn = document.getElementById('vs-emp-prev-btn');
+			if (empPrevBtn) {
+				empPrevBtn.addEventListener('click', () => {
+					if (this.state.employeePagination.current_page > 1) {
+						this.state.employeePagination.current_page--;
+						this.fetchEmployees();
+					}
+				});
+			}
+
+			const empNextBtn = document.getElementById('vs-emp-next-btn');
+			if (empNextBtn) {
+				empNextBtn.addEventListener('click', () => {
+					if (this.state.employeePagination.current_page < this.state.employeePagination.total_pages) {
+						this.state.employeePagination.current_page++;
+						this.fetchEmployees();
+					}
+				});
+			}
+
+			// Debounced Audit Search
 			const auditSearchInput = document.getElementById('vs-audit-search-input');
 			if (auditSearchInput) {
 				auditSearchInput.addEventListener('input', (e) => {
+					clearTimeout(this.state.searchDebounceTimer);
 					this.state.auditSearch = e.target.value;
-					this.fetchAuditLogs();
+					this.state.auditPagination.current_page = 1;
+					this.state.searchDebounceTimer = setTimeout(() => this.fetchAuditLogs(), 300);
+				});
+			}
+
+			// Audit Pagination
+			const auditPrevBtn = document.getElementById('vs-audit-prev-btn');
+			if (auditPrevBtn) {
+				auditPrevBtn.addEventListener('click', () => {
+					if (this.state.auditPagination.current_page > 1) {
+						this.state.auditPagination.current_page--;
+						this.fetchAuditLogs();
+					}
+				});
+			}
+
+			const auditNextBtn = document.getElementById('vs-audit-next-btn');
+			if (auditNextBtn) {
+				auditNextBtn.addEventListener('click', () => {
+					if (this.state.auditPagination.current_page < this.state.auditPagination.total_pages) {
+						this.state.auditPagination.current_page++;
+						this.fetchAuditLogs();
+					}
 				});
 			}
 
@@ -710,10 +782,34 @@
 				});
 			}
 
+			const discoverWifiBtn = document.getElementById('vs-discover-wifi-btn');
+			if (discoverWifiBtn) {
+				discoverWifiBtn.addEventListener('click', () => {
+					this.request('/wifi/discover', 'POST', { branch_id: this.state.selectedBranchId })
+						.then(res => {
+							this.showAlert('vs-wifi-alert', res.message, res.success ? 'success' : 'error');
+						});
+				});
+			}
+
 			this.startLiveClock();
 		},
 
-		runAttendanceSequence: function (action) {
+		requestGeolocation: function () {
+			return new Promise((resolve) => {
+				if (navigator.geolocation) {
+					navigator.geolocation.getCurrentPosition(
+						(pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+						() => resolve(null),
+						{ timeout: 5000 }
+					);
+				} else {
+					resolve(null);
+				}
+			});
+		},
+
+		runAttendanceSequence: async function (action) {
 			const overrideBox = document.getElementById('vs-override-checkbox');
 			const exceptionOverride = overrideBox && overrideBox.checked;
 
@@ -721,6 +817,9 @@
 			const tokenParam = urlParams.get('token') || '';
 			const ssidParam = urlParams.get('ssid') || 'Workplace_WiFi';
 			const bssidParam = urlParams.get('bssid') || '';
+
+			// Attempt optional GPS coordinates retrieval
+			const coords = await this.requestGeolocation();
 
 			const overlay = document.createElement('div');
 			overlay.className = 'vs-progress-overlay';
@@ -760,6 +859,8 @@
 					bssid: bssidParam,
 					token: tokenParam,
 					timestamp: Math.floor(Date.now() / 1000),
+					latitude: coords ? coords.latitude : null,
+					longitude: coords ? coords.longitude : null,
 					exception_override: exceptionOverride
 				};
 
@@ -926,13 +1027,14 @@
 		},
 
 		fetchEmployees: function () {
-			let endpoint = '/employees?';
+			let endpoint = `/employees?page=${this.state.employeePagination.current_page}&per_page=20&`;
 			if (this.state.empSearch) endpoint += `search=${encodeURIComponent(this.state.empSearch)}&`;
 			if (this.state.empRoleFilter) endpoint += `role=${encodeURIComponent(this.state.empRoleFilter)}&`;
 
 			return this.request(endpoint, 'GET').then(res => {
 				if (res.success) {
 					this.state.employees = res.employees;
+					if (res.pagination) this.state.employeePagination = res.pagination;
 					this.render();
 				}
 			});
@@ -966,12 +1068,13 @@
 		},
 
 		fetchAuditLogs: function () {
-			let endpoint = '/audit-logs?';
+			let endpoint = `/audit-logs?page=${this.state.auditPagination.current_page}&per_page=50&`;
 			if (this.state.auditSearch) endpoint += `search=${encodeURIComponent(this.state.auditSearch)}&`;
 
 			return this.request(endpoint, 'GET').then(res => {
 				if (res.success) {
 					this.state.auditLogs = res.logs;
+					if (res.pagination) this.state.auditPagination = res.pagination;
 					this.render();
 				}
 			});
